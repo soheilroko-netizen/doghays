@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>dakal-tls v5</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body class="main-window">
+    <div id="app">
+      <!-- ═══ Main View ═══ -->
+      <div class="container" id="main-view">
+        <div class="logo-container">
+          <img src="/src-tauri/icons/logo.png" alt="AKAL" class="app-logo" />
+        </div>
+
+        <!-- App Header: Server + Protocol Selection -->
+        <div class="app-header">
+          <div class="profile-bar-main" style="margin-bottom: 10px;">
+            <!-- Custom Server Selector with Flags -->
+            <div class="custom-select" id="server-selector-wrapper">
+              <button type="button" class="custom-select-trigger" id="server-selector-trigger">
+                <span class="custom-select-flag" id="server-selector-flag"></span>
+                <span class="custom-select-text" id="server-selector-text">Germany 1</span>
+                <svg class="custom-select-chevron" viewBox="0 0 24 24" width="16" height="16">
+                  <path d="M7 10l5 5 5-5" stroke="currentColor" stroke-width="2" fill="none"/>
+                </svg>
+              </button>
+              <div class="custom-select-options" id="server-selector-options">
+                <div class="custom-select-option" data-value="netherlands-1" data-flag="nl">
+                  <img src="https://flagcdn.com/16x12/nl.png" alt="NL" /> Netherlands 1
+                </div>
+                <div class="custom-select-option" data-value="germany-3" data-flag="de">
+                  <img src="https://flagcdn.com/16x12/de.png" alt="DE" /> Germany 3
+                </div>
+                <div class="custom-select-option" data-value="finland-1" data-flag="fi">
+                  <img src="https://flagcdn.com/16x12/fi.png" alt="FI" /> Finland 1
+                </div>
+              </div>
+            </div>
+            <button id="btn-settings-toggle" class="btn-small">Settings</button>
+            <button id="btn-main-log" class="btn-small">Log</button>
+            <button id="btn-doh" class="btn-small" title="Set DNS to private DoH servers">DoH DNS</button>
+          </div>
+
+          <!-- Protocol Tabs -->
+          <div class="protocol-tabs">
+            <button class="tab active" data-protocol="h2">Hysteria2</button>
+            <button class="tab" data-protocol="stls">ShadowTLS</button>
+          </div>
+        </div>
+
+        <!-- Settings Panel (collapsible) -->
+        <div id="settings-panel" style="display:none;margin-bottom:10px;padding:12px;background:#1a1a2e;border-radius:6px;border:1px solid #333;">
+          <h3 style="margin:0 0 8px;color:#fff;font-size:14px;">Settings</h3>
+          
+          <div style="margin-bottom:8px;">
+            <label style="display:block;color:#888;font-size:11px;margin-bottom:4px;">MTU (leave empty for auto-detect)</label>
+            <input type="number" id="setting-mtu" placeholder="Auto" style="width:100%;padding:6px;background:#0f0f1e;color:#fff;border:1px solid #444;border-radius:4px;font-size:12px;" />
+          </div>
+
+          <!-- Custom Mode: Bypass domains box -->
+          <div id="custom-rules-container" style="display:none;margin-bottom:8px;">
+            <label style="display:block;color:#888;font-size:11px;margin-bottom:4px;">Domains to bypass VPN (everything else uses VPN)</label>
+            <textarea id="setting-split-rules" placeholder="example.com&#10;google.com" rows="3" style="width:100%;padding:6px;background:#0f0f1e;color:#fff;border:1px solid #444;border-radius:4px;font-size:11px;font-family:monospace;resize:vertical;"></textarea>
+          </div>
+
+          <!-- WoW Mode: info label only -->
+          <div id="wow-info-container" style="display:none;margin-bottom:8px;padding:8px;background:#0f0f1e;border-radius:4px;border:1px solid #444;">
+            <label style="display:block;color:#888;font-size:11px;margin-bottom:4px;">WoW Split Mode</label>
+            <div style="color:#4ade80;font-size:11px;">Only Blizzard domains use VPN. Everything else bypasses.</div>
+          </div>
+
+          <div style="display:flex;gap:8px;margin-bottom:8px;">
+            <button id="btn-update-geofiles" style="display:none;flex:1;padding:6px;font-size:11px;background:#1a1a2e;color:#ffaa00;border:1px solid #444;border-radius:4px;cursor:pointer;">Update Geo Files</button>
+            <button id="btn-save-settings" class="btn btn-secondary" style="flex:2;padding:6px;font-size:12px;">Save Settings</button>
+          </div>
+        </div>
+
+        <div id="h2-preset-selector" style="display:none;margin:6px 0;">
+          <label style="display:block;color:#888;font-size:11px;margin-bottom:6px;">H2 Speed Preset:</label>
+          <div class="h2-preset-cards">
+            <button class="h2-preset-card" data-preset="adsl">
+              <div class="preset-name">ADSL</div>
+              <div class="preset-speeds">↑4 / ↓16</div>
+            </button>
+            <button class="h2-preset-card" data-preset="4g">
+              <div class="preset-name">4G</div>
+              <div class="preset-speeds">↑15 / ↓30</div>
+            </button>
+            <button class="h2-preset-card active" data-preset="5g">
+              <div class="preset-name">5G</div>
+              <div class="preset-speeds">↑40 / ↓80</div>
+            </button>
+            <button class="h2-preset-card" data-preset="max">
+              <div class="preset-name">MAX</div>
+              <div class="preset-speeds">↑80 / ↓120</div>
+            </button>
+          </div>
+        </div>
+
+        <div id="split-preset-selector" style="display:none;margin:6px 0;">
+          <label style="display:block;color:#888;font-size:11px;margin-bottom:6px;">Split Tunnel Preset:</label>
+          <div class="split-preset-cards">
+            <button class="split-preset-card" data-preset="full">
+              <div class="preset-name">Full Tunnel</div>
+            </button>
+            <button class="split-preset-card" data-preset="wow">
+              <div class="preset-name">WoW Split</div>
+            </button>
+          </div>
+        </div>
+
+        <!-- Status Banner -->
+        <div class="status-card">
+          <div class="status-indicator" id="status-dot"></div>
+          <span id="status-text">Disconnected</span>
+          <span class="status-address" id="status-address"></span>
+          
+          <!-- Protocol Indicator (TCP/UDP) -->
+          <span id="protocol-indicator" class="protocol-indicator" style="display:none;margin-left:auto;padding:2px 8px;font-size:11px;font-weight:600;border-radius:4px;background:rgba(255,255,255,0.1);color:var(--text-secondary);"></span>
+          
+        </div>
+
+        <!-- Metrics Grid -->
+        <div class="metrics-grid">
+          <div class="metric-tile ping-tile">
+            <div class="ping-bars">
+              <div class="ping-triangle" id="ping-triangle"></div>
+              <div class="ping-bar ping-bar-4" data-threshold="201"></div>
+              <div class="ping-bar ping-bar-3" data-threshold="146"></div>
+              <div class="ping-bar ping-bar-2" data-threshold="106"></div>
+              <div class="ping-bar ping-bar-1" data-threshold="0"></div>
+            </div>
+            <div class="ping-content">
+              <div class="metric-value" id="ping-value">-</div>
+              <div class="metric-label">Ping</div>
+            </div>
+          </div>
+          <div class="metric-tile">
+            <div class="metric-value" id="traffic-up-value">0 B/s</div>
+            <div class="metric-total" id="traffic-up-total">Total: 0 B</div>
+            <canvas class="sparkline" id="sparkline-up" width="100" height="24"></canvas>
+            <div class="metric-label">↑ Upload</div>
+          </div>
+          <div class="metric-tile">
+            <div class="metric-value" id="traffic-down-value">0 B/s</div>
+            <div class="metric-total" id="traffic-down-total">Total: 0 B</div>
+            <canvas class="sparkline" id="sparkline-down" width="100" height="24"></canvas>
+            <div class="metric-label">↓ Download</div>
+          </div>
+        </div>
+
+        <div class="controls">
+          <button id="btn-start" class="btn btn-primary">
+            <span id="btn-start-text">Start</span>
+          </button>
+          <button id="btn-stop" class="btn btn-danger" disabled>Stop</button>
+        </div>
+
+        <div id="message" class="message"></div>
+
+        <!-- Inline Log Panel -->
+        <div class="log-section" id="log-section">
+          <button class="log-toggle" id="log-toggle">
+            <span>Show Logs</span>
+            <svg class="chevron" viewBox="0 0 24 24" width="16" height="16">
+              <path d="M7 10l5 5 5-5" stroke="currentColor" stroke-width="2" fill="none"/>
+            </svg>
+          </button>
+          <pre class="log-content" id="inline-log-content"></pre>
+        </div>
+      </div>
+
+      <!-- ═══ Log View ═══ -->
+      <div class="container" id="log-view" style="display:none">
+        <h1>Connection Log</h1>
+        <p class="subtitle">sing-box runtime logs</p>
+        <div class="controls">
+          <button id="btn-refresh-log" class="btn btn-secondary">Refresh</button>
+          <button id="btn-back-from-log" class="btn btn-secondary">Back</button>
+        </div>
+        <pre id="log-content" class="log-content"></pre>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

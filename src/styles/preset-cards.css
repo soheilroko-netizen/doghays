@@ -1,0 +1,101 @@
+.h2-preset-cards {
+  display: flex;
+  gap: 6px;
+}
+
+.h2-preset-card {
+  flex: 1;
+  padding: 8px 6px;
+  background: var(--bg-card);
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: center;
+  font-family: inherit;
+}
+
+.h2-preset-card:hover {
+  background: var(--bg-tertiary);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.h2-preset-card.active {
+  background: rgba(0, 180, 216, 0.15);
+  border-color: var(--accent-h2);
+  box-shadow: 0 0 12px rgba(0, 180, 216, 0.3);
+}
+
+.preset-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+}
+
+.preset-speeds {
+  font-size: 9px;
+  color: var(--text-secondary);
+  font-family: 'Courier New', monospace;
+}
+
+.h2-preset-card.active .preset-name {
+  color: var(--accent-h2);
+}
+
+.h2-preset-card.active .preset-speeds {
+  color: var(--accent-h2);
+  opacity: 0.8;
+}
+
+/* Split tunnel preset cards */
+.split-preset-cards {
+  display: flex;
+  gap: 6px;
+}
+
+.split-preset-card {
+  flex: 1;
+  padding: 8px 6px;
+  background: var(--bg-card);
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: center;
+  font-family: inherit;
+}
+
+.split-preset-card:hover {
+  background: var(--bg-tertiary);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.split-preset-card.active {
+  background: rgba(0, 180, 216, 0.15);
+  border-color: var(--accent-h2);
+  box-shadow: 0 0 12px rgba(0, 180, 216, 0.3);
+}
+
+.split-preset-card .preset-name {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+}
+
+.split-preset-card .preset-desc {
+  font-size: 9px;
+  color: var(--text-secondary);
+}
+
+.split-preset-card.active .preset-name {
+  color: var(--accent-h2);
+}
+
+.split-preset-card.active .preset-desc {
+  color: var(--accent-h2);
+  opacity: 0.8;
+}

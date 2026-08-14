@@ -1,0 +1,9 @@
+/* ── Import modular CSS ──────────────────────────────────── */
+@import './styles/base.css';
+@import './styles/components.css';
+@import './styles/layout.css';
+@import './styles/ping.css';
+@import './styles/preset-cards.css';
+
+/* ── Legacy styles (to be removed in Phase 2+) ────────────── */
+/* These styles are kept temporarily for compatibility */

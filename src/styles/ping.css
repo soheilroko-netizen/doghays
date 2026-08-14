@@ -1,0 +1,87 @@
+/* ── Ping Tile with Vertical Bars ───────────────────────── */
+
+.ping-tile {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ping-content {
+  flex: 1;
+  text-align: left;
+}
+
+.ping-content .metric-value {
+  text-align: left;
+  min-width: auto;
+}
+
+.ping-content .metric-label {
+  text-align: left;
+}
+
+/* ── Ping Bars (Vertical Stack - Bottom to Top) ─────────── */
+
+.ping-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  height: 60px;
+  justify-content: flex-end;
+}
+
+.ping-bar {
+  width: 20px;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  transition: background 0.3s, box-shadow 0.3s;
+}
+
+.ping-bar.active {
+  box-shadow: 0 0 8px currentColor;
+}
+
+/* Bar 1: 0-105ms (Green) - Bottom */
+.ping-bar-1.active {
+  background: var(--ping-green);
+  color: var(--ping-green);
+}
+
+/* Bar 2: 106-145ms (Yellow) - Second from bottom */
+.ping-bar-2.active {
+  background: var(--ping-yellow);
+  color: var(--ping-yellow);
+}
+
+/* Bar 3: 146-200ms (Orange) - Third from bottom */
+.ping-bar-3.active {
+  background: var(--ping-orange);
+  color: var(--ping-orange);
+}
+
+/* Bar 4: 201-300ms (Red) - Fourth from bottom */
+.ping-bar-4.active {
+  background: var(--ping-red);
+  color: var(--ping-red);
+}
+
+/* Bar 5: 300+ms (Dark Red Triangle) - Top */
+.ping-triangle {
+  width: 0;
+  height: 0;
+  border-left: 10px solid transparent;
+  border-right: 10px solid transparent;
+  border-bottom: 14px solid transparent;
+  align-self: center;
+  opacity: 0.3;
+  transition: opacity 0.3s, border-bottom-color 0.3s;
+}
+
+.ping-triangle.active {
+  opacity: 1;
+  border-bottom-color: #8b0000;
+}
+

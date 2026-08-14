@@ -1,0 +1,451 @@
+/* ── Layout & Structure ──────────────────────────────────── */
+
+/* ── Container ───────────────────────────────────────────── */
+
+.container {
+  background: var(--bg-secondary);
+  border-radius: 16px;
+  padding: 20px;
+  width: 450px;
+  max-height: 96vh;
+  overflow-y: auto;
+  box-shadow: var(--shadow-lg);
+}
+
+/* ── App Header (Profile Bar) ────────────────────────────── */
+
+.app-header {
+  margin-bottom: 12px;
+}
+
+.profile-bar-main {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+  align-items: stretch;
+}
+
+.profile-bar-main .profile-select {
+  flex: 1;
+  min-height: 36px;
+  padding: 6px 10px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 14px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+/* ── Custom Select with Flags ─────────────────────────────── */
+
+.custom-select {
+  position: relative;
+  flex: 1;
+}
+
+.custom-select-trigger {
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 10px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 14px;
+  font-family: inherit;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.custom-select-trigger:hover {
+  background: var(--bg-tertiary);
+  border-color: var(--accent-h2);
+}
+
+.custom-select-trigger:focus {
+  outline: none;
+  border-color: var(--accent-h2);
+}
+
+.custom-select-flag {
+  display: flex;
+  align-items: center;
+  min-width: 24px;
+}
+
+.custom-select-flag img {
+  width: 24px;
+  height: 16px;
+  border-radius: 2px;
+}
+
+.custom-select-text {
+  flex: 1;
+  text-align: left;
+}
+
+.custom-select-chevron {
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  transition: transform 0.2s;
+}
+
+.custom-select.open .custom-select-chevron {
+  transform: rotate(180deg);
+}
+
+.custom-select-options {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  display: none;
+  z-index: 100;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.custom-select.open .custom-select-options {
+  display: block;
+}
+
+.custom-select-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  transition: background 0.15s;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.custom-select-option:hover {
+  background: var(--bg-tertiary);
+}
+
+.custom-select-option img {
+  width: 24px;
+  height: 16px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.custom-select-option.active {
+  background: var(--bg-tertiary);
+  color: var(--accent-h2);
+}
+
+/* ── Protocol Indicator ───────────────────────────────────── */
+
+.protocol-indicator {
+  font-family: 'Courier New', monospace;
+  letter-spacing: 0.5px;
+}
+
+.protocol-indicator.protocol-udp {
+  background: rgba(74, 222, 128, 0.2) !important;
+  color: #4ade80 !important;
+  border: 1px solid rgba(74, 222, 128, 0.4);
+}
+
+.protocol-indicator.protocol-tcp {
+  background: rgba(250, 204, 21, 0.2) !important;
+  color: #facc15 !important;
+  border: 1px solid rgba(250, 204, 21, 0.4);
+}
+
+.protocol-tabs .tab {
+  flex: 1;
+  padding: 8px 12px;
+  background: transparent;
+  color: var(--text-primary);
+  border: none;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.protocol-tabs .tab.active {
+  background: var(--accent-h2);
+  color: #000;
+  font-weight: 600;
+}
+
+/* ── Status Banner ───────────────────────────────────────── */
+
+.status-card {
+  display: flex;
+  align-items: center;
+  padding: 10px;
+  background: var(--bg-card);
+  border-radius: 12px;
+  gap: 10px;
+  margin-bottom: 12px;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-md);
+  backdrop-filter: blur(10px);
+  background: rgba(15, 52, 96, 0.6);
+  transition: border-color 0.3s, box-shadow 0.3s;
+}
+
+.status-card.protocol-h2 {
+  border-color: var(--accent-h2);
+  box-shadow: 0 4px 12px rgba(0, 180, 216, 0.2);
+}
+
+.status-card.protocol-stls {
+  border-color: var(--accent-stls);
+  box-shadow: 0 4px 12px rgba(168, 85, 247, 0.2);
+}
+
+.status-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+  padding: 1px;
+  background: linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.02));
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+#status-text {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.status-address {
+  margin-left: auto;
+  font-size: 12px;
+  font-family: 'Courier New', monospace;
+  color: var(--text-secondary);
+}
+
+/* ── Metrics Grid ────────────────────────────────────────── */
+
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  margin-bottom: 12px;
+}
+
+.metric-tile {
+  background: var(--bg-card);
+  border-radius: 8px;
+  padding: 8px;
+  text-align: center;
+  border: 1px solid var(--border);
+  transition: background 0.2s, transform 0.2s, box-shadow 0.2s;
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(10px);
+  background: rgba(15, 52, 96, 0.4);
+}
+
+.metric-tile:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+  background: rgba(15, 52, 96, 0.6);
+}
+
+.metric-value {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+  transition: opacity 0.2s, transform 0.2s;
+  min-width: 80px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.metric-value.updating {
+  opacity: 0.6;
+  transform: scale(0.98);
+}
+
+.sparkline {
+  display: block;
+  margin: 4px auto;
+  opacity: 0.8;
+}
+
+.metric-total {
+  font-size: 10px;
+  color: var(--text-secondary);
+  opacity: 0.75;
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.metric-total.vpn {
+  color: var(--accent-h2);
+  opacity: 0.7;
+}
+
+.metric-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+/* ── Controls Section ────────────────────────────────────── */
+
+.controls {
+  display: flex;
+  gap: 10px;
+  margin-top: var(--spacing-lg);
+}
+
+/* ── Settings Panel ──────────────────────────────────────── */
+
+#settings-panel {
+  margin-bottom: 10px;
+  padding: 12px;
+  background: var(--bg-tertiary);
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+
+#settings-panel h3 {
+  margin: 0 0 8px;
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+#custom-rules-container {
+  margin-bottom: 8px;
+}
+
+/* ── H2 Preset Selector ──────────────────────────────────── */
+
+#h2-preset-selector {
+  margin: 6px 0;
+  padding: 8px;
+  background: var(--bg-tertiary);
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+
+#h2-preset-selector label {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+#h2-preset-dropdown {
+  flex: 1;
+  padding: 4px 8px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+/* ── Log Content ─────────────────────────────────────────── */
+/* ── Log Section (Inline) ────────────────────────────────── */
+
+.log-section {
+  margin-top: var(--spacing-lg);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+}
+
+.log-toggle {
+  width: 100%;
+  padding: var(--spacing-md);
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  transition: background 0.2s;
+}
+
+.log-toggle:hover {
+  background: var(--bg-tertiary);
+}
+
+.log-toggle .chevron {
+  transition: transform 0.3s;
+}
+
+.log-section.expanded .log-toggle .chevron {
+  transform: rotate(180deg);
+}
+
+.log-section .log-content {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.3s ease-out;
+  background: #0a0a0a;
+  color: #0f0;
+  padding: 0;
+  margin: 0;
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-family: 'Courier New', monospace;
+}
+
+.log-section.expanded .log-content {
+  max-height: 240px;
+  overflow-y: auto;
+  padding: var(--spacing-md);
+}
+
+/* ── Mode Toggle (Legacy) ────────────────────────────────── */
+
+.mode-toggle {
+  display: flex;
+  gap: 4px;
+  margin-bottom: var(--spacing-lg);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px;
+}
+
+.mode-btn {
+  flex: 1;
+  padding: 8px 12px;
+  background: transparent;
+  color: var(--text-primary);
+  border: none;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.mode-btn.active {
+  background: var(--accent-h2);
+  color: #000;
+  font-weight: 600;
+}

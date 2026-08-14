@@ -1,0 +1,61 @@
+name: Tauri Build
+on:
+  push:
+    branches: [main, v2, v4, v5, v6, v12, kiri, h2, h2-optimized-ci-test, final, ui-improvements, feature/netherlands-germany3-profiles]
+  pull_request:
+    branches: [main, v2, v4, v5, v6, v12, kiri, h2, final, ui-improvements, feature/netherlands-germany3-profiles]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install Cargo Dependencies
+        run: |
+          cd src-tauri
+          cargo fetch
+
+      - name: Download sing-box
+        shell: pwsh
+        run: |
+          $release = Invoke-RestMethod "https://api.github.com/repos/SagerNet/sing-box/releases/latest" -Headers @{"User-Agent"="stls"}
+          $tag = $release.tag_name.TrimStart('v')
+          Write-Host "sing-box version: $tag"
+          $zip = "sing-box-$tag-windows-amd64.zip"
+          $asset = $release.assets | Where-Object { $_.name -eq $zip } | Select-Object -First 1
+          if (-not $asset) { throw "Asset $zip not found" }
+          Write-Host "Downloading $($asset.browser_download_url)"
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile sb.zip
+          New-Item -ItemType Directory -Force src-tauri/bin | Out-Null
+          tar -xf sb.zip -C src-tauri/bin --strip-components=1 "sing-box-$tag-windows-amd64/sing-box.exe"
+          Get-ChildItem src-tauri/bin/sing-box.exe | Select-Object Name, Length
+
+      - name: Install npm dependencies
+        run: npm install
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Tauri build
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: --verbose
+
+      - name: Upload NSIS installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: shado-installer
+          path: src-tauri/target/release/bundle/nsis/*.exe

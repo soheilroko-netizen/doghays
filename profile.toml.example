@@ -1,0 +1,20 @@
+# stls profile — all fields optional.
+# Copy this file to `profile.toml` next to stls.exe, edit, and re-run.
+# Anything you omit falls back to the built-in defaults.
+# Tip: `stls.exe --write-profile` dumps the current effective profile here.
+
+# Shadowsocks 2022
+ss_method   = "2022-blake3-chacha20-poly1305"
+ss_password = "tE+3/qlN/orCZRVUutWouysZ8BQs4RWzq46WK6CDGG4="
+ss_server   = "ns.baft.uk"
+ss_port     = 8380
+
+# ShadowTLS v3 (wraps the Shadowsocks connection)
+stls_server   = "ns.baft.uk"
+stls_port     = 8553
+stls_password = "y2lachetore"
+stls_sni      = "dl.google.com"
+
+# Local SOCKS5 listen address
+local_addr = "127.0.0.1"
+local_port = 1080

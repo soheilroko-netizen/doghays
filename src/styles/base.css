@@ -1,0 +1,103 @@
+/* ── Base Styles & CSS Variables ─────────────────────────── */
+
+:root {
+  /* Base colors */
+  --bg-primary: #0a0e1a;
+  --bg-secondary: #16213e;
+  --bg-tertiary: #1a2744;
+  --bg-card: #0f3460;
+  
+  /* Text */
+  --text-primary: #f0f4f8;
+  --text-secondary: #94a3b8;
+  --text-tertiary: #64748b;
+  
+  /* Accents */
+  --accent-h2: #00b4d8;
+  --accent-stls: #a855f7;
+  --success: #10b981;
+  --success-dim: #047857;
+  --error: #ef4444;
+  --warning: #f59e0b;
+  
+  /* Ping colors */
+  --ping-green: #00ff88;
+  --ping-yellow: #ffcc00;
+  --ping-orange: #ff6b35;
+  --ping-red: #ff3366;
+  
+  /* UI elements */
+  --border: #334155;
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
+  
+  /* Spacing scale */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 12px;
+  --spacing-lg: 16px;
+  --spacing-xl: 24px;
+}
+
+/* ── CSS Reset ───────────────────────────────────────────── */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* ── Typography ──────────────────────────────────────────── */
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 14px;
+  line-height: 1.5;
+  height: 100vh;
+  overflow: hidden;
+}
+
+body.main-window {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+#app {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+/* ── Logo ────────────────────────────────────────────────── */
+
+.logo-container {
+  text-align: center;
+  margin-bottom: 8px;
+}
+
+.app-logo {
+  height: 42px;
+  width: auto;
+  filter: brightness(0) saturate(100%) invert(66%) sepia(85%) saturate(3582%) hue-rotate(164deg) brightness(99%) contrast(101%);
+}
+
+h1 {
+  font-size: 28px;
+  font-weight: 700;
+  text-align: center;
+  margin-bottom: 16px;
+  color: var(--accent-h2);
+}
+
+.subtitle {
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 13px;
+  margin-bottom: 24px;
+}
