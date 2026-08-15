@@ -301,7 +301,7 @@
 .traffic-up { color: #4ade80; }
 .traffic-down { color: #60a5fa; }
 
-/* Total numbers: white, placed right of arrow */
+/* Total numbers + arrow: white, same size as rate value */
 .traffic-foot {
   display: flex;
   align-items: center;
@@ -311,6 +311,12 @@
 .traffic-total {
   color: #fff;
   opacity: 0.9;
+  font-size: 20px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.metric-label {
+  font-size: 20px;
 }
 
 .metric-value.updating {
