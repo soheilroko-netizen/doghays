@@ -265,7 +265,7 @@
 }
 
 .metric-value {
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 600;
   color: var(--text-primary);
   margin-bottom: 4px;
@@ -274,6 +274,23 @@
   text-align: center;
   font-variant-numeric: tabular-nums;
 }
+
+/* Packet loss on top half of ping card */
+#loss-value {
+  font-size: 16px;
+  color: var(--text-secondary);
+}
+
+/* Ping ms number pushed lower */
+.ping-ms {
+  margin-top: 6px;
+}
+
+/* Traffic value colors matching sparklines */
+.traffic-up { color: #4ade80; }
+.traffic-down { color: #60a5fa; }
+.traffic-up-total { color: #4ade80; opacity: 0.75; }
+.traffic-down-total { color: #60a5fa; opacity: 0.75; }
 
 .metric-value.updating {
   opacity: 0.6;
@@ -301,9 +318,7 @@
 }
 
 .metric-label {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  font-size: 14px;
   color: var(--text-secondary);
   margin-top: 4px;
 }

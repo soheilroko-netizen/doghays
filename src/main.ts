@@ -81,6 +81,7 @@ const statusCard = document.querySelector('.status-card')!;
 
 // Metrics elements
 const pingValue = document.getElementById('ping-value')!;
+const lossValue = document.getElementById('loss-value')!;
 const trafficUpValue = document.getElementById('traffic-up-value')!;
 const trafficDownValue = document.getElementById('traffic-down-value')!;
 const trafficUpTotal = document.getElementById('traffic-up-total')!;
@@ -213,6 +214,28 @@ function updateSparklines(upSpeed: number, downSpeed: number) {
   drawSparkline(sparklineDown, downHistory, '#60a5fa');
 }
 let pingTimer: ReturnType<typeof setInterval> | null = null;
+let lossTimer: ReturnType<typeof setInterval> | null = null;
+
+// Packet-loss tracking: ring buffer of last 30 samples (~past minute at 2s)
+const LOSS_SAMPLES = 30;
+const LOSS_TIMEOUT_MS = 1000; // latency above this counts as loss (gaming: 1s is an eternity)
+const lossRing: boolean[] = []; // true = lost
+
+async function sampleLoss() {
+  let lost = false;
+  try {
+    const result = await invoke<string>('real_ping');
+    const ms = parseInt(result.replace('ms', ''));
+    if (isNaN(ms) || ms > LOSS_TIMEOUT_MS) lost = true;
+  } catch {
+    lost = true;
+  }
+  lossRing.push(lost);
+  if (lossRing.length > LOSS_SAMPLES) lossRing.shift();
+  const lostCount = lossRing.filter(Boolean).length;
+  const pct = Math.round((lostCount / lossRing.length) * 100);
+  lossValue.textContent = `${pct}%`;
+}
 
 async function doPing() {
   try {
@@ -253,12 +276,16 @@ async function doPing() {
 function startPingLoop() {
   stopPingLoop();
   doPing();
+  sampleLoss();
   pingTimer = setInterval(doPing, PING_INTERVAL_MS);
+  lossTimer = setInterval(sampleLoss, 2000);
 }
 
 function stopPingLoop() {
   if (pingTimer) clearInterval(pingTimer);
+  if (lossTimer) clearInterval(lossTimer);
   pingTimer = null;
+  lossTimer = null;
 }
 
 // ── Status update (every 2s) ─────────────────────────────────
