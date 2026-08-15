@@ -6,7 +6,6 @@ use std::fs;
 use std::path::PathBuf;
 
 pub const DEFAULT_PROFILE: &str = "netherlands-1-stls";
-pub const GEOFILES_COOLDOWN_SECS: u64 = 7 * 24 * 3600; // 7 days
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -280,31 +279,4 @@ pub fn get_active_config() -> Config {
     cfg.split_rules = split_rules;
 
     cfg
-}
-
-/// Save geofiles update timestamp to config.json
-pub fn save_geofiles_timestamp() -> Result<()> {
-    let mut existing = load_config_json();
-    existing["geofiles_last_update"] = serde_json::Value::String(
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)?
-            .as_secs()
-            .to_string()
-    );
-    save_config_json(&existing)
-}
-
-/// Check if geofiles cooldown period has passed (returns true if can download)
-pub fn can_download_geofiles() -> bool {
-    let v = load_config_json();
-    if let Some(ts) = v["geofiles_last_update"].as_str() {
-        if let Ok(last_secs) = ts.parse::<u64>() {
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs();
-            return now.saturating_sub(last_secs) >= GEOFILES_COOLDOWN_SECS;
-        }
-    }
-    true
 }

@@ -388,7 +388,7 @@ fn get_h2_speeds() -> Result<serde_json::Value, String> {
 }
 
 #[tauri::command]
-fn update_settings(mtu: Option<u32>, split_mode: String, split_rules: Vec<String>, reconnect: bool, state: State<AppState>, app: tauri::AppHandle) -> Result<bool, String> {
+fn update_settings(mtu: Option<u32>, split_mode: String, split_rules: Vec<SplitRule>, reconnect: bool, state: State<AppState>, app: tauri::AppHandle) -> Result<bool, String> {
     // Validate MTU
     if let Some(m) = mtu {
         if m < 576 || m > 9000 {
@@ -396,19 +396,13 @@ fn update_settings(mtu: Option<u32>, split_mode: String, split_rules: Vec<String
         }
     }
     
-    // Validate split mode (backend supports full/wow; custom accepted as-is)
+    // Validate split mode (backend supports full/wow/custom; custom accepted as-is)
     if !["full", "wow", "custom"].contains(&split_mode.as_str()) {
         return Err("Invalid split mode".into());
     }
     
-    // Save split tunnel settings
-    let split_rules_vec: Vec<SplitRule> = split_rules.into_iter().map(|pattern| SplitRule {
-        pattern,
-        process_names: vec![],
-        folder_paths: vec![],
-    }).collect();
-    
-    config::save_split_settings(&split_mode, split_rules_vec).map_err(|e| e.to_string())?;
+    // Persist split tunnel settings (domains + per-app process rules)
+    config::save_split_settings(&split_mode, split_rules).map_err(|e| e.to_string())?;
     
     // Reconnect if proxy is running and requested
     let restarted = if reconnect {

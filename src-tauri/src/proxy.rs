@@ -267,21 +267,51 @@ impl ProxyManager {
             {"ip_cidr": bypass_cidrs, "outbound": "direct"}
         ]);
 
-        // Add split tunnel rules
+        // Add split tunnel rules (domain + per-app process rules)
+        let mut has_app_rules = false;
         if !c.split_rules.is_empty() {
             let mut split_rules = Vec::new();
             for split_rule in &c.split_rules {
-                let pattern = &split_rule.pattern;
                 // Split rules are "bypass" exceptions (route to direct)
                 // In WoW mode, rules are whitelist entries (route to final_outbound)
                 let outbound = if is_wow_mode { final_outbound } else { "direct" };
-                
-                if pattern.starts_with("*.") {
-                    split_rules.push(serde_json::json!({"domain_suffix": [pattern[1..].to_string()], "outbound": outbound}));
-                } else if pattern.contains("*") {
-                    split_rules.push(serde_json::json!({"domain_keyword": [pattern.replace("*", "")], "outbound": outbound}));
-                } else {
-                    split_rules.push(serde_json::json!({"domain": [pattern.clone()], "outbound": outbound}));
+
+                let mut rule = serde_json::Map::new();
+
+                let pattern = split_rule.pattern.trim();
+                if !pattern.is_empty() {
+                    if pattern.starts_with("*.") {
+                        rule.insert("domain_suffix".into(), serde_json::json!([pattern[1..].to_string()]));
+                    } else if pattern.contains('*') {
+                        rule.insert("domain_keyword".into(), serde_json::json!([pattern.replace('*', "")]));
+                    } else {
+                        rule.insert("domain".into(), serde_json::json!([pattern.to_string()]));
+                    }
+                }
+
+                // App-based rules: process name (e.g. "telegram.exe") and/or path glob
+                let pnames: Vec<String> = split_rule.process_names
+                    .iter()
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                let ppaths: Vec<String> = split_rule.folder_paths
+                    .iter()
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                if !pnames.is_empty() {
+                    rule.insert("process_name".into(), serde_json::json!(pnames));
+                    has_app_rules = true;
+                }
+                if !ppaths.is_empty() {
+                    rule.insert("process_path".into(), serde_json::json!(ppaths));
+                    has_app_rules = true;
+                }
+
+                if !rule.is_empty() {
+                    rule.insert("outbound".into(), serde_json::json!(outbound));
+                    split_rules.push(serde_json::Value::Object(rule));
                 }
             }
             let arr = route_rules.as_array_mut().unwrap();
@@ -333,7 +363,7 @@ impl ProxyManager {
                 "final": route_final,
                 "auto_detect_interface": true,
                 "default_domain_resolver": "remote-doh",
-                "find_process": false
+                "find_process": has_app_rules
             }
         }))
     }
