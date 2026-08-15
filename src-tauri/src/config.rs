@@ -15,7 +15,6 @@ pub struct Config {
     pub stls_port: u16,
     pub stls_password: String,
     pub stls_sni: String,
-    pub socks5_port: u16,
     pub mtu: Option<u32>,
     #[serde(default)]
     pub split_mode: String, // "full", "wow"
@@ -31,13 +30,10 @@ pub struct Config {
     pub h2_insecure: bool,
     pub h2_obfs: String,
     pub h2_obfs_password: String,
-    pub h2_mport: String,
     #[serde(default = "h2_mbps_up_default")]
     pub h2_up_mbps: u32,
     #[serde(default = "h2_mbps_down_default")]
     pub h2_down_mbps: u32,
-    #[serde(default = "h2_auto_default")]
-    pub h2_auto: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -114,9 +110,6 @@ pub fn h2_mbps_up_default() -> u32 { 40 }
 /// Default Hysteria2 download bandwidth in Mbps
 pub fn h2_mbps_down_default() -> u32 { 80 }
 
-/// Auto-tune flag default
-pub fn h2_auto_default() -> bool { false }
-
 /// Save split tunnel settings to config.json
 pub fn save_split_settings(split_mode: &str, split_rules: Vec<SplitRule>) -> Result<()> {
     let mut existing = load_config_json();
@@ -173,7 +166,6 @@ pub fn get_profile_config(profile: &str) -> Config {
     let stls_sni = "dl.google.com".to_string();
     let h2_password = "testpass1".to_string();
     let h2_obfs_password = "testobfspass".to_string();
-    let h2_mport = "40001-45000".to_string();
 
     match profile {
         "netherlands-1-h2" => Config {
@@ -181,7 +173,7 @@ pub fn get_profile_config(profile: &str) -> Config {
             h2_sni: "ns.baft.uk".to_string(),
             h2_obfs: "salamander".to_string(),
             mode: "hysteria2".to_string(),
-            h2_password, h2_obfs_password, h2_mport,
+            h2_password, h2_obfs_password,
             h2_up_mbps: up, h2_down_mbps: down,
             ..default_config()
         },
@@ -196,7 +188,7 @@ pub fn get_profile_config(profile: &str) -> Config {
             h2_sni: "ns.baft.uk".to_string(),
             h2_obfs: "salamander".to_string(),
             mode: "hysteria2".to_string(),
-            h2_password, h2_obfs_password, h2_mport,
+            h2_password, h2_obfs_password,
             h2_up_mbps: up, h2_down_mbps: down,
             ..default_config()
         },
@@ -211,7 +203,7 @@ pub fn get_profile_config(profile: &str) -> Config {
             h2_sni: "de3.baft.uk".to_string(),
             h2_obfs: "salamander".to_string(),
             mode: "hysteria2".to_string(),
-            h2_password, h2_obfs_password, h2_mport,
+            h2_password, h2_obfs_password,
             h2_up_mbps: up, h2_down_mbps: down,
             ..default_config()
         },
@@ -226,7 +218,7 @@ pub fn get_profile_config(profile: &str) -> Config {
             h2_sni: "fn.baft.uk".to_string(),
             h2_obfs: "salamander".to_string(),
             mode: "hysteria2".to_string(),
-            h2_password, h2_obfs_password, h2_mport,
+            h2_password, h2_obfs_password,
             h2_up_mbps: up, h2_down_mbps: down,
             ..default_config()
         },
@@ -250,7 +242,6 @@ fn default_config() -> Config {
         stls_port: 8553,
         stls_password: String::new(),
         stls_sni: String::new(),
-        socks5_port: 1080,
         mtu: None,
         split_mode: "full".to_string(),
         split_rules: vec![],
@@ -261,10 +252,8 @@ fn default_config() -> Config {
         h2_insecure: false,
         h2_obfs: String::new(),
         h2_obfs_password: String::new(),
-        h2_mport: String::new(),
         h2_up_mbps: up,
         h2_down_mbps: down,
-        h2_auto: false,
     }
 }
 

@@ -50,7 +50,6 @@ interface Config {
   stls_port: number;
   stls_password: string;
   stls_sni: string;
-  socks5_port: number;
   mtu?: number;
   split_mode?: string;
   split_rules?: { pattern: string }[];
@@ -61,10 +60,8 @@ interface Config {
   h2_insecure: boolean;
   h2_obfs: string;
   h2_obfs_password: string;
-  h2_mport: string;
   h2_up_mbps: number;
   h2_down_mbps: number;
-  h2_auto: boolean;
 }
 
 // ── Elements ─────────────────────────────────────────────

@@ -28,8 +28,6 @@ fn no_window(cmd: &mut Command) -> &mut Command {
 const TUN_FALLBACK_CIDR: &str = "198.18.0.0/15";
 /// Static placeholder IP used when no server IP was resolved
 const TUN_FALLBACK_IP: &str = "198.18.0.0";
-/// Number of bootstrap route rules (sniff, dns, bypass) before split/WoW rules
-const ROUTE_RULES_BOOTSTRAP_COUNT: usize = 3;
 
 pub struct ProxyManager {
     child: Arc<Mutex<Option<Child>>>,
