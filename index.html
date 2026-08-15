@@ -65,13 +65,13 @@
             <div style="color:#4ade80;font-size:11px;margin-bottom:8px;">Blizzard domains use VPN. Check apps to also tunnel them.</div>
             <div style="display:flex;flex-direction:column;gap:8px;">
               <label style="display:flex;align-items:center;gap:10px;color:#ddd;font-size:13px;cursor:pointer;">
-                <input type="checkbox" id="wow-app-discord" checked /> <span>Discord</span>
+                <span>Discord</span> <input type="checkbox" id="wow-app-discord" checked />
               </label>
               <label style="display:flex;align-items:center;gap:10px;color:#ddd;font-size:13px;cursor:pointer;">
-                <input type="checkbox" id="wow-app-chrome" checked /> <span>Chrome</span>
+                <span>Chrome</span> <input type="checkbox" id="wow-app-chrome" checked />
               </label>
               <label style="display:flex;align-items:center;gap:10px;color:#ddd;font-size:13px;cursor:pointer;">
-                <input type="checkbox" id="wow-app-telegram" checked /> <span>Telegram</span>
+                <span>Telegram</span> <input type="checkbox" id="wow-app-telegram" checked />
               </label>
             </div>
           </div>
@@ -137,21 +137,28 @@
               <div class="ping-bar ping-bar-1" data-threshold="0"></div>
             </div>
             <div class="ping-content">
-              <div class="metric-value" id="loss-value">0%</div>
+              <div class="loss-row">
+                <span class="loss-label">Loss</span>
+                <div class="metric-value" id="loss-value">0%</div>
+              </div>
               <div class="metric-value ping-ms" id="ping-value">-</div>
             </div>
           </div>
           <div class="metric-tile">
             <div class="metric-value traffic-up" id="traffic-up-value">0 B/s</div>
             <canvas class="sparkline" id="sparkline-up" width="100" height="24"></canvas>
-            <div class="metric-total traffic-up-total" id="traffic-up-total">Total: 0 B</div>
-            <div class="metric-label">↑</div>
+            <div class="traffic-foot">
+              <div class="metric-total traffic-total" id="traffic-up-total">0 B</div>
+              <div class="metric-label">↑</div>
+            </div>
           </div>
           <div class="metric-tile">
             <div class="metric-value traffic-down" id="traffic-down-value">0 B/s</div>
             <canvas class="sparkline" id="sparkline-down" width="100" height="24"></canvas>
-            <div class="metric-total traffic-down-total" id="traffic-down-total">Total: 0 B</div>
-            <div class="metric-label">↓</div>
+            <div class="traffic-foot">
+              <div class="metric-total traffic-total" id="traffic-down-total">0 B</div>
+              <div class="metric-label">↓</div>
+            </div>
           </div>
         </div>
 

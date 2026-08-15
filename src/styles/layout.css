@@ -277,7 +277,18 @@
 
 /* Packet loss on top half of ping card */
 #loss-value {
-  font-size: 16px;
+  font-size: 20px;
+  color: #fff;
+}
+
+/* "Loss" label left of the percent */
+.loss-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.loss-label {
+  font-size: 13px;
   color: var(--text-secondary);
 }
 
@@ -289,8 +300,18 @@
 /* Traffic value colors matching sparklines */
 .traffic-up { color: #4ade80; }
 .traffic-down { color: #60a5fa; }
-.traffic-up-total { color: #4ade80; opacity: 0.75; }
-.traffic-down-total { color: #60a5fa; opacity: 0.75; }
+
+/* Total numbers: white, placed right of arrow */
+.traffic-foot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.traffic-total {
+  color: #fff;
+  opacity: 0.9;
+}
 
 .metric-value.updating {
   opacity: 0.6;

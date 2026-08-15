@@ -367,8 +367,8 @@ async function updateStatus() {
 
     trafficUpValue.textContent = s.running ? formatSpeed(s.traffic_up) : '0 B/s';
     trafficDownValue.textContent = s.running ? formatSpeed(s.traffic_down) : '0 B/s';
-    trafficUpTotal.textContent = `Total: ${formatBytes(s.total_up)}`;
-    trafficDownTotal.textContent = `Total: ${formatBytes(s.total_down)}`;
+    trafficUpTotal.textContent = `${formatBytes(s.total_up)}`;
+    trafficDownTotal.textContent = `${formatBytes(s.total_down)}`;
     
     // Update sparklines
     if (s.running) {
