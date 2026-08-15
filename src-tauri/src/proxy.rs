@@ -318,21 +318,29 @@ impl ProxyManager {
             arr.splice(3..3, split_rules);
         }
 
-        // For WoW mode, add hardcoded WoW domains
+        // For WoW mode, add hardcoded WoW domains + tunnel the target apps
         let has_wow_rules = c.split_rules.iter().any(|r| {
             matches!(r.pattern.as_str(), "*.battle.net" | "*.blizzard.com" | "*.worldofwarcraft.com" | "*.akamaized.net" | "*.discord.com" | "*.discord.gg" | "*.discordapp.com" | "*.discordapp.net")
         });
-        if is_wow_mode && !has_wow_rules {
-            let wow_domains = [
-                "battle.net",
-                "blizzard.com",
-                "worldofwarcraft.com",
-                "akamaized.net",
-            ];
+        if is_wow_mode {
             let arr = route_rules.as_array_mut().unwrap();
-            for domain in wow_domains {
-                arr.insert(3, serde_json::json!({"domain_suffix": [domain], "outbound": default_direct}));
+            if !has_wow_rules {
+                let wow_domains = [
+                    "battle.net",
+                    "blizzard.com",
+                    "worldofwarcraft.com",
+                    "akamaized.net",
+                ];
+                for domain in wow_domains {
+                    arr.insert(3, serde_json::json!({"domain_suffix": [domain], "outbound": default_direct}));
+                }
             }
+            // Target apps route through the VPN (tunnel-list semantics in WoW)
+            arr.insert(3, serde_json::json!({
+                "process_name": ["Discord.exe", "Update.exe", "Telegram.exe", "chrome.exe"],
+                "outbound": default_direct
+            }));
+            has_app_rules = true; // ensure route.find_process is enabled so process rules match
         }
 
         Ok(serde_json::json!({
