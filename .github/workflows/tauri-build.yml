@@ -30,7 +30,7 @@ jobs:
         shell: pwsh
         run: |
           $tag = "v1.13.18"
-          $zip = "sing-box-$tag-windows-amd64.zip"
+          $zip = "sing-box-1.13.18-windows-amd64.zip"
           $url = "https://github.com/SagerNet/sing-box/releases/download/$tag/$zip"
           Write-Host "Downloading sing-box $tag from $url"
           Invoke-WebRequest -Uri $url -OutFile sb.zip
