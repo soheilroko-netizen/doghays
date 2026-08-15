@@ -37,12 +37,6 @@ interface FullStatus {
   log_lines: string[];
 }
 
-interface SplitRule {
-  pattern: string;
-  process_names?: string[];
-  folder_paths?: string[];
-}
-
 interface Config {
   server_address: string;
   ss_port: number;
@@ -52,7 +46,6 @@ interface Config {
   stls_sni: string;
   mtu?: number;
   split_mode?: string;
-  split_rules?: { pattern: string }[];
   mode: string;
   h2_port: number;
   h2_password: string;
@@ -117,12 +110,8 @@ const btnRefreshLog = document.getElementById('btn-refresh-log')!;
 const btnBackFromLog = document.getElementById('btn-back-from-log')!;
 
 // Settings inputs
-const customRulesContainer = document.getElementById('custom-rules-container')!;
 const wowInfoContainer = document.getElementById('wow-info-container')!;
 const settingMtu = document.getElementById('setting-mtu') as HTMLInputElement;
-const settingSplitRules = document.getElementById('setting-split-rules') as HTMLTextAreaElement;
-const settingAppNames = document.getElementById('setting-app-names') as HTMLTextAreaElement;
-const settingAppPaths = document.getElementById('setting-app-paths') as HTMLTextAreaElement;
 const btnSaveSettings = document.getElementById('btn-save-settings')!;
 const btnDoh = document.getElementById('btn-doh') as HTMLButtonElement;
 
@@ -526,18 +515,11 @@ async function loadSettings() {
   try {
     const cfg = await invoke<Config>('get_config');
     settingMtu.value = cfg.mtu ? String(cfg.mtu) : '';
-    
-    // Load split settings
-    const splitSettings = await invoke<{ split_mode: string; split_rules: SplitRule[] }>('get_split_settings');
+
+    // Load split mode
+    const splitSettings = await invoke<{ split_mode: string }>('get_split_settings');
     const mode = splitSettings.split_mode || 'full';
-    // Render first rule's domains into the domain box; app rules join across rules
-    const domains = splitSettings.split_rules?.map(r => r.pattern).filter(p => p && p.trim() !== '').join('\n') || '';
-    const appNames = [...new Set(splitSettings.split_rules?.flatMap(r => r.process_names || []))].join('\n');
-    const appPaths = [...new Set(splitSettings.split_rules?.flatMap(r => r.folder_paths || []))].join('\n');
-    settingSplitRules.value = domains;
-    settingAppNames.value = appNames;
-    settingAppPaths.value = appPaths;
-    
+
     // Update split preset UI
     updateSplitPresetUI(mode);
   } catch (e) {
@@ -550,34 +532,7 @@ function updateSplitPresetUI(preset: string) {
     card.classList.toggle('active', (card as HTMLElement).dataset.preset === preset);
   });
 
-  customRulesContainer.style.display = preset === 'custom' ? 'block' : 'none';
   wowInfoContainer.style.display = preset === 'wow' ? 'block' : 'none';
-}
-
-// Build structured split rules from the custom-mode inputs.
-// Each domain line becomes a rule carrying the shared app (process) rules,
-// so "domain OR app" → bypass. Apps-only (no domains) → one process-only rule.
-function buildCustomRules(): SplitRule[] {
-  const appNames = settingAppNames.value
-    .split('\n').map(s => s.trim()).filter(s => s.length > 0);
-  const appPaths = settingAppPaths.value
-    .split('\n').map(s => s.trim()).filter(s => s.length > 0);
-  const domains = settingSplitRules.value
-    .split('\n').map(s => s.trim()).filter(s => s.length > 0);
-
-  const rules: SplitRule[] = [];
-
-  // Domain rules (each carries the app rules so domain OR app → bypass)
-  for (const d of domains) {
-    rules.push({ pattern: d, process_names: appNames, folder_paths: appPaths });
-  }
-
-  // Apps-only: no domains entered, but apps specified
-  if (domains.length === 0 && (appNames.length > 0 || appPaths.length > 0)) {
-    rules.push({ pattern: '', process_names: appNames, folder_paths: appPaths });
-  }
-
-  return rules;
 }
 
 // Split preset card handlers
@@ -586,15 +541,11 @@ splitPresetCards.forEach(card => {
     const preset = (card as HTMLElement).dataset.preset || 'full';
     updateSplitPresetUI(preset);
 
-    // No custom rules in non-custom modes — WoW domains hardcoded in backend
-    const splitRules: SplitRule[] = preset === 'custom' ? buildCustomRules() : [];
-
     try {
       const running = await invoke('get_status');
       await invoke('update_settings', {
         mtu: settingMtu.value ? parseInt(settingMtu.value, 10) : null,
         splitMode: preset,
-        splitRules,
         reconnect: running
       });
       showMessage('Settings saved', false);
@@ -627,10 +578,9 @@ btnSaveSettings.addEventListener('click', async () => {
     // Get current split mode from active preset card
     const activeCard = document.querySelector('.split-preset-card.active') as HTMLElement;
     const splitMode = activeCard ? activeCard.dataset.preset || 'full' : 'full';
-    const splitRules: SplitRule[] = splitMode === 'custom' ? buildCustomRules() : [];
 
     const running = await invoke('get_status');
-    await invoke('update_settings', { mtu, splitMode, splitRules, reconnect: running });
+    await invoke('update_settings', { mtu, splitMode, reconnect: running });
     showMessage('Settings saved', false);
     if (running) showMessage('Reconnecting...', false);
   } catch (e) {

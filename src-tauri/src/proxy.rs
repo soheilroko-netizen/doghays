@@ -265,82 +265,20 @@ impl ProxyManager {
             {"ip_cidr": bypass_cidrs, "outbound": "direct"}
         ]);
 
-        // Add split tunnel rules (domain + per-app process rules)
+        // App-rule flag (set by WoW block below)
         let mut has_app_rules = false;
-        if !c.split_rules.is_empty() {
-            let mut split_rules = Vec::new();
-            for split_rule in &c.split_rules {
-                // Split rules are "bypass" exceptions (route to direct)
-                // In WoW mode, rules are whitelist entries (route to final_outbound)
-                let outbound = if is_wow_mode { final_outbound } else { "direct" };
-
-                let mut rule = serde_json::Map::new();
-
-                let pattern = split_rule.pattern.trim();
-                if !pattern.is_empty() {
-                    if pattern.starts_with("*.") {
-                        rule.insert("domain_suffix".into(), serde_json::json!([pattern[1..].to_string()]));
-                    } else if pattern.contains('*') {
-                        rule.insert("domain_keyword".into(), serde_json::json!([pattern.replace('*', "")]));
-                    } else {
-                        rule.insert("domain".into(), serde_json::json!([pattern.to_string()]));
-                    }
-                }
-
-                // App-based rules: process name (e.g. "telegram.exe") and/or path glob
-                let pnames: Vec<String> = split_rule.process_names
-                    .iter()
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect();
-                let ppaths: Vec<String> = split_rule.folder_paths
-                    .iter()
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect();
-                if !pnames.is_empty() {
-                    // Case-insensitive matching: sing-box process_name is
-                    // case-sensitive on Windows, so also emit lowercase variants.
-                    let mut names = pnames.clone();
-                    for n in &pnames {
-                        let low = n.to_lowercase();
-                        if !names.contains(&low) {
-                            names.push(low);
-                        }
-                    }
-                    rule.insert("process_name".into(), serde_json::json!(names));
-                    has_app_rules = true;
-                }
-                if !ppaths.is_empty() {
-                    rule.insert("process_path".into(), serde_json::json!(ppaths));
-                    has_app_rules = true;
-                }
-
-                if !rule.is_empty() {
-                    rule.insert("outbound".into(), serde_json::json!(outbound));
-                    split_rules.push(serde_json::Value::Object(rule));
-                }
-            }
-            let arr = route_rules.as_array_mut().unwrap();
-            arr.splice(3..3, split_rules);
-        }
 
         // For WoW mode, add hardcoded WoW domains + tunnel the target apps
-        let has_wow_rules = c.split_rules.iter().any(|r| {
-            matches!(r.pattern.as_str(), "*.battle.net" | "*.blizzard.com" | "*.worldofwarcraft.com" | "*.akamaized.net" | "*.discord.com" | "*.discord.gg" | "*.discordapp.com" | "*.discordapp.net")
-        });
         if is_wow_mode {
             let arr = route_rules.as_array_mut().unwrap();
-            if !has_wow_rules {
-                let wow_domains = [
-                    "battle.net",
-                    "blizzard.com",
-                    "worldofwarcraft.com",
-                    "akamaized.net",
-                ];
-                for domain in wow_domains {
-                    arr.insert(3, serde_json::json!({"domain_suffix": [domain], "outbound": default_direct}));
-                }
+            let wow_domains = [
+                "battle.net",
+                "blizzard.com",
+                "worldofwarcraft.com",
+                "akamaized.net",
+            ];
+            for domain in wow_domains {
+                arr.insert(3, serde_json::json!({"domain_suffix": [domain], "outbound": default_direct}));
             }
             // Target apps route through the VPN (tunnel-list semantics in WoW)
             arr.insert(3, serde_json::json!({
@@ -392,7 +330,7 @@ impl ProxyManager {
             let mut h2 = serde_json::json!({
                 "type": "hysteria2", "tag": "h2-out",
                 "server": c.server_address,
-                "server_ports": [format!("{}:{}", c.h2_port, c.h2_port + 5000)],
+                "server_ports": [format!("{}-{}", c.h2_port, c.h2_port + 5000)],
                 "hop_interval": "30s",
                 "up_mbps": c.h2_up_mbps,
                 "down_mbps": c.h2_down_mbps,

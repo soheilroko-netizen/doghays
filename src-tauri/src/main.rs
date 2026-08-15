@@ -5,7 +5,7 @@ mod config;
 mod proxy;
 mod doh;
 
-use config::{Config, SplitRule};
+use config::{Config};
 #[cfg(target_os = "windows")]
 fn check_single_instance() {
     use std::ffi::CString;
@@ -388,7 +388,7 @@ fn get_h2_speeds() -> Result<serde_json::Value, String> {
 }
 
 #[tauri::command]
-fn update_settings(mtu: Option<u32>, split_mode: String, split_rules: Vec<SplitRule>, reconnect: bool, state: State<AppState>, app: tauri::AppHandle) -> Result<bool, String> {
+fn update_settings(mtu: Option<u32>, split_mode: String, reconnect: bool, state: State<AppState>, app: tauri::AppHandle) -> Result<bool, String> {
     // Validate MTU
     if let Some(m) = mtu {
         if m < 576 || m > 9000 {
@@ -396,13 +396,13 @@ fn update_settings(mtu: Option<u32>, split_mode: String, split_rules: Vec<SplitR
         }
     }
     
-    // Validate split mode (backend supports full/wow/custom; custom accepted as-is)
-    if !["full", "wow", "custom"].contains(&split_mode.as_str()) {
+    // Validate split mode (backend supports full/wow)
+    if !["full", "wow"].contains(&split_mode.as_str()) {
         return Err("Invalid split mode".into());
     }
     
-    // Persist split tunnel settings (domains + per-app process rules)
-    config::save_split_settings(&split_mode, split_rules).map_err(|e| e.to_string())?;
+    // Persist split mode
+    config::save_split_mode(&split_mode).map_err(|e| e.to_string())?;
     
     // Reconnect if proxy is running and requested
     let restarted = if reconnect {
@@ -424,10 +424,9 @@ fn update_settings(mtu: Option<u32>, split_mode: String, split_rules: Vec<SplitR
 
 #[tauri::command]
 fn get_split_settings() -> Result<serde_json::Value, String> {
-    let (split_mode, split_rules) = config::load_split_settings();
+    let split_mode = config::load_split_mode();
     Ok(serde_json::json!({
-        "split_mode": split_mode,
-        "split_rules": split_rules
+        "split_mode": split_mode
     }))
 }
 

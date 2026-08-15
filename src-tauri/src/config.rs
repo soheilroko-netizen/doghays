@@ -18,8 +18,6 @@ pub struct Config {
     pub mtu: Option<u32>,
     #[serde(default)]
     pub split_mode: String, // "full", "wow"
-    #[serde(default)]
-    pub split_rules: Vec<SplitRule>,
 
     pub mode: String,
 
@@ -34,15 +32,6 @@ pub struct Config {
     pub h2_up_mbps: u32,
     #[serde(default = "h2_mbps_down_default")]
     pub h2_down_mbps: u32,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct SplitRule {
-    pub pattern: String,
-    #[serde(default)]
-    pub process_names: Vec<String>,
-    #[serde(default)]
-    pub folder_paths: Vec<String>,
 }
 
 fn config_path() -> Result<PathBuf> {
@@ -110,28 +99,16 @@ pub fn h2_mbps_up_default() -> u32 { 40 }
 /// Default Hysteria2 download bandwidth in Mbps
 pub fn h2_mbps_down_default() -> u32 { 80 }
 
-/// Save split tunnel settings to config.json
-pub fn save_split_settings(split_mode: &str, split_rules: Vec<SplitRule>) -> Result<()> {
+/// Save split mode to config.json
+pub fn save_split_mode(split_mode: &str) -> Result<()> {
     let mut existing = load_config_json();
     existing["split_mode"] = serde_json::Value::String(split_mode.to_string());
-    existing["split_rules"] = serde_json::to_value(split_rules)?;
     save_config_json(&existing)
 }
 
-/// Load split tunnel settings from config.json
-pub fn load_split_settings() -> (String, Vec<SplitRule>) {
-    let v = load_config_json();
-    let mode = v["split_mode"].as_str().unwrap_or("full").to_string();
-    let rules = v["split_rules"].as_array().map(|arr| {
-        arr.iter().filter_map(|r| {
-            Some(SplitRule {
-                pattern: r["pattern"].as_str()?.to_string(),
-                process_names: r["process_names"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default(),
-                folder_paths: r["folder_paths"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default(),
-            })
-        }).collect()
-    }).unwrap_or_default();
-    (mode, rules)
+/// Load split mode from config.json
+pub fn load_split_mode() -> String {
+    load_config_json()["split_mode"].as_str().unwrap_or("full").to_string()
 }
 
 /// Profile descriptor returned by [`parse_profile`]
@@ -244,7 +221,6 @@ fn default_config() -> Config {
         stls_sni: String::new(),
         mtu: None,
         split_mode: "full".to_string(),
-        split_rules: vec![],
         mode: "shadowtls".to_string(),
         h2_port: 40001,
         h2_password: String::new(),
@@ -262,10 +238,8 @@ pub fn get_active_config() -> Config {
     let profile = load_profile();
     let mut cfg = get_profile_config(&profile);
 
-    // Split tunnel settings from config.json override profile defaults
-    let (split_mode, split_rules) = load_split_settings();
-    cfg.split_mode = split_mode;
-    cfg.split_rules = split_rules;
+    // Split mode from config.json overrides profile default
+    cfg.split_mode = load_split_mode();
 
     cfg
 }
