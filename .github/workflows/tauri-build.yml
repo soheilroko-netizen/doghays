@@ -29,13 +29,16 @@ jobs:
       - name: Download sing-box
         shell: pwsh
         run: |
-          $tag = "v1.13.18"
-          $zip = "sing-box-1.13.18-windows-amd64.zip"
-          $url = "https://github.com/SagerNet/sing-box/releases/download/$tag/$zip"
-          Write-Host "Downloading sing-box $tag from $url"
-          Invoke-WebRequest -Uri $url -OutFile sb.zip
+          $release = Invoke-RestMethod "https://api.github.com/repos/SagerNet/sing-box/releases/latest" -Headers @{"User-Agent"="stls"}
+          $tag = $release.tag_name.TrimStart('v')
+          Write-Host "sing-box version: $tag"
+          $zip = "sing-box-$tag-windows-amd64.zip"
+          $asset = $release.assets | Where-Object { $_.name -eq $zip } | Select-Object -First 1
+          if (-not $asset) { throw "Asset $zip not found" }
+          Write-Host "Downloading $($asset.browser_download_url)"
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile sb.zip
           New-Item -ItemType Directory -Force src-tauri/bin | Out-Null
-          tar -xf sb.zip -C src-tauri/bin --strip-components=1 "sing-box-1.13.18-windows-amd64/sing-box.exe"
+          tar -xf sb.zip -C src-tauri/bin --strip-components=1 "sing-box-$tag-windows-amd64/sing-box.exe"
           Get-ChildItem src-tauri/bin/sing-box.exe | Select-Object Name, Length
 
       - name: Install npm dependencies
