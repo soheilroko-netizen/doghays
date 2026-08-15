@@ -84,10 +84,16 @@
 }
 
 .btn-small.active {
-  background: rgba(74, 222, 128, 0.15);
+  background: rgba(74, 222, 128, 0.22);
   border-color: #4ade80;
   color: #4ade80;
-  box-shadow: 0 0 10px rgba(74, 222, 128, 0.3);
+  box-shadow: 0 0 12px rgba(74, 222, 128, 0.8), 0 0 22px rgba(74, 222, 128, 0.5);
+  animation: doh-glow 1.6s ease-in-out infinite;
+}
+
+@keyframes doh-glow {
+  0%, 100% { box-shadow: 0 0 10px rgba(74, 222, 128, 0.6), 0 0 18px rgba(74, 222, 128, 0.35); }
+  50%      { box-shadow: 0 0 16px rgba(74, 222, 128, 1), 0 0 30px rgba(74, 222, 128, 0.7); }
 }
 
 /* ── Form Elements ───────────────────────────────────────── */
