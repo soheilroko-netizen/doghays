@@ -456,7 +456,7 @@ fn set_profile(app: tauri::AppHandle, state: State<AppState>, profile: String) -
 }
 
 /// All selectable server variants (location + instance number)
-const PROFILE_SERVERS: [&str; 4] = ["netherlands-1", "germany-1", "germany-3", "finland-1"];
+const PROFILE_SERVERS: [&str; 3] = ["netherlands-1", "germany-3", "finland-1"];
 /// Protocol suffixes mapped to config modes
 const PROFILE_MODES: [&str; 2] = ["h2", "stls"];
 

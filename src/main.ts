@@ -418,13 +418,11 @@ async function loadProfile() {
 function updateServerSelectorUI(server: string) {
   const flagMap: Record<string, string> = {
     'netherlands-1': 'nl',
-    'germany-1': 'de',
     'germany-3': 'de',
     'finland-1': 'fi'
   };
   const displayMap: Record<string, string> = {
     'netherlands-1': 'Netherlands 1',
-    'germany-1': 'Germany 1',
     'germany-3': 'Germany 3',
     'finland-1': 'Finland 1'
   };

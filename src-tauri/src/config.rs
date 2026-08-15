@@ -128,7 +128,6 @@ pub fn parse_profile(profile: &str) -> ProfileInfo {
     };
     match server {
         "netherlands-1" => ProfileInfo { server_name: "Netherlands #1", protocol },
-        "germany-1" => ProfileInfo { server_name: "Germany #1", protocol },
         "germany-3" => ProfileInfo { server_name: "Germany #3", protocol },
         "finland-1" => ProfileInfo { server_name: "Finland #1", protocol },
         _ => ProfileInfo { server_name: "Unknown", protocol },
@@ -146,21 +145,6 @@ pub fn get_profile_config(profile: &str) -> Config {
 
     match profile {
         "netherlands-1-h2" => Config {
-            server_address: "ns.baft.uk".to_string(),
-            h2_sni: "ns.baft.uk".to_string(),
-            h2_obfs: "salamander".to_string(),
-            mode: "hysteria2".to_string(),
-            h2_password, h2_obfs_password,
-            h2_up_mbps: up, h2_down_mbps: down,
-            ..default_config()
-        },
-        "germany-1-stls" => Config {
-            server_address: "ns.baft.uk".to_string(),
-            mode: "shadowtls".to_string(),
-            ss_password: stls_ss_password, stls_password, stls_sni,
-            ..default_config()
-        },
-        "germany-1-h2" => Config {
             server_address: "ns.baft.uk".to_string(),
             h2_sni: "ns.baft.uk".to_string(),
             h2_obfs: "salamander".to_string(),
