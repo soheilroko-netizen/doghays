@@ -35,7 +35,7 @@ jobs:
           Write-Host "Downloading sing-box $tag from $url"
           Invoke-WebRequest -Uri $url -OutFile sb.zip
           New-Item -ItemType Directory -Force src-tauri/bin | Out-Null
-          tar -xf sb.zip -C src-tauri/bin --strip-components=1 "sing-box-$tag-windows-amd64/sing-box.exe"
+          tar -xf sb.zip -C src-tauri/bin --strip-components=1 "sing-box-1.13.18-windows-amd64/sing-box.exe"
           Get-ChildItem src-tauri/bin/sing-box.exe | Select-Object Name, Length
 
       - name: Install npm dependencies
