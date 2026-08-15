@@ -330,7 +330,7 @@ impl ProxyManager {
             let mut h2 = serde_json::json!({
                 "type": "hysteria2", "tag": "h2-out",
                 "server": c.server_address,
-                "server_ports": [format!("{}-{}", c.h2_port, c.h2_port + 4999)],
+                "server_ports": [format!("{}:{}", c.h2_port, c.h2_port + 4999)],
                 "hop_interval": "30s",
                 "up_mbps": c.h2_up_mbps,
                 "down_mbps": c.h2_down_mbps,
