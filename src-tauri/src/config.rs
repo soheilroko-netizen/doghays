@@ -124,7 +124,8 @@ pub fn save_wow_apps(apps: &[String]) -> Result<()> {
 
 /// Load WoW checked app ids; defaults to all three checked if absent
 pub fn load_wow_apps() -> Vec<String> {
-    let arr = load_config_json()["wow_apps"].as_array();
+    let cfg = load_config_json();
+    let arr = cfg["wow_apps"].as_array();
     match arr {
         Some(a) => a.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect(),
         None => vec!["discord".to_string(), "chrome".to_string(), "telegram".to_string()],
