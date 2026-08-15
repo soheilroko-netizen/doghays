@@ -388,7 +388,7 @@ fn get_h2_speeds() -> Result<serde_json::Value, String> {
 }
 
 #[tauri::command]
-fn update_settings(mtu: Option<u32>, split_mode: String, reconnect: bool, state: State<AppState>, app: tauri::AppHandle) -> Result<bool, String> {
+fn update_settings(mtu: Option<u32>, split_mode: String, reconnect: bool, wow_apps: Option<Vec<String>>, state: State<AppState>, app: tauri::AppHandle) -> Result<bool, String> {
     // Validate MTU
     if let Some(m) = mtu {
         if m < 576 || m > 9000 {
@@ -403,6 +403,14 @@ fn update_settings(mtu: Option<u32>, split_mode: String, reconnect: bool, state:
     
     // Persist split mode
     config::save_split_mode(&split_mode).map_err(|e| e.to_string())?;
+
+    // Persist WoW checked apps when in wow mode (default all three when none passed)
+    if split_mode == "wow" {
+        let apps = wow_apps.unwrap_or_else(|| {
+            vec!["discord".to_string(), "chrome".to_string(), "telegram".to_string()]
+        });
+        config::save_wow_apps(&apps).map_err(|e| e.to_string())?;
+    }
     
     // Reconnect if proxy is running and requested
     let restarted = if reconnect {
@@ -425,8 +433,10 @@ fn update_settings(mtu: Option<u32>, split_mode: String, reconnect: bool, state:
 #[tauri::command]
 fn get_split_settings() -> Result<serde_json::Value, String> {
     let split_mode = config::load_split_mode();
+    let wow_apps = config::load_wow_apps();
     Ok(serde_json::json!({
-        "split_mode": split_mode
+        "split_mode": split_mode,
+        "wow_apps": wow_apps
     }))
 }
 

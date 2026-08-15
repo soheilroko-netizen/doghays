@@ -268,7 +268,7 @@ impl ProxyManager {
         // App-rule flag (set by WoW block below)
         let mut has_app_rules = false;
 
-        // For WoW mode, add hardcoded WoW domains + tunnel the target apps
+        // For WoW mode, add hardcoded WoW domains (always tunnel) + user-checked apps
         if is_wow_mode {
             let arr = route_rules.as_array_mut().unwrap();
             let wow_domains = [
@@ -280,12 +280,21 @@ impl ProxyManager {
             for domain in wow_domains {
                 arr.insert(3, serde_json::json!({"domain_suffix": [domain], "outbound": default_direct}));
             }
-            // Target apps route through the VPN (tunnel-list semantics in WoW)
-            arr.insert(3, serde_json::json!({
-                "process_name": ["Discord.exe", "Update.exe", "Telegram.exe", "chrome.exe"],
-                "outbound": default_direct
-            }));
-            has_app_rules = true; // ensure route.find_process is enabled so process rules match
+            // Apps to tunnel, keyed by user-checkbox id
+            let app_map: &[(&str, &[&str])] = &[
+                ("discord", &["Discord.exe", "Update.exe"]),
+                ("chrome", &["chrome.exe"]),
+                ("telegram", &["Telegram.exe"]),
+            ];
+            for (id, exes) in app_map {
+                if c.wow_apps.iter().any(|a| a == id) {
+                    arr.insert(3, serde_json::json!({
+                        "process_name": exes.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+                        "outbound": default_direct
+                    }));
+                    has_app_rules = true; // enable route.find_process so process rules match
+                }
+            }
         }
 
         Ok(serde_json::json!({

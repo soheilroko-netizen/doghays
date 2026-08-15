@@ -46,6 +46,7 @@ interface Config {
   stls_sni: string;
   mtu?: number;
   split_mode?: string;
+  wow_apps?: string[];
   mode: string;
   h2_port: number;
   h2_password: string;
@@ -111,6 +112,9 @@ const btnBackFromLog = document.getElementById('btn-back-from-log')!;
 
 // Settings inputs
 const wowInfoContainer = document.getElementById('wow-info-container')!;
+const wowAppDiscord = document.getElementById('wow-app-discord') as HTMLInputElement;
+const wowAppChrome = document.getElementById('wow-app-chrome') as HTMLInputElement;
+const wowAppTelegram = document.getElementById('wow-app-telegram') as HTMLInputElement;
 const settingMtu = document.getElementById('setting-mtu') as HTMLInputElement;
 const btnSaveSettings = document.getElementById('btn-save-settings')!;
 const btnDoh = document.getElementById('btn-doh') as HTMLButtonElement;
@@ -515,8 +519,14 @@ async function loadSettings() {
     settingMtu.value = cfg.mtu ? String(cfg.mtu) : '';
 
     // Load split mode
-    const splitSettings = await invoke<{ split_mode: string }>('get_split_settings');
+    const splitSettings = await invoke<{ split_mode: string; wow_apps?: string[] }>('get_split_settings');
     const mode = splitSettings.split_mode || 'full';
+
+    // Set WoW app checkboxes (default all checked)
+    const apps = splitSettings.wow_apps || ['discord', 'chrome', 'telegram'];
+    wowAppDiscord.checked = apps.includes('discord');
+    wowAppChrome.checked = apps.includes('chrome');
+    wowAppTelegram.checked = apps.includes('telegram');
 
     // Update split preset UI
     updateSplitPresetUI(mode);
@@ -533,6 +543,15 @@ function updateSplitPresetUI(preset: string) {
   wowInfoContainer.style.display = preset === 'wow' ? 'block' : 'none';
 }
 
+// Gather currently-checked WoW app ids
+function getWowApps(): string[] {
+  const apps: string[] = [];
+  if (wowAppDiscord.checked) apps.push('discord');
+  if (wowAppChrome.checked) apps.push('chrome');
+  if (wowAppTelegram.checked) apps.push('telegram');
+  return apps;
+}
+
 // Split preset card handlers
 splitPresetCards.forEach(card => {
   card.addEventListener('click', async () => {
@@ -544,6 +563,7 @@ splitPresetCards.forEach(card => {
       await invoke('update_settings', {
         mtu: settingMtu.value ? parseInt(settingMtu.value, 10) : null,
         splitMode: preset,
+        wowApps: preset === 'wow' ? getWowApps() : null,
         reconnect: running
       });
       showMessage('Settings saved', false);
@@ -578,7 +598,7 @@ btnSaveSettings.addEventListener('click', async () => {
     const splitMode = activeCard ? activeCard.dataset.preset || 'full' : 'full';
 
     const running = await invoke('get_status');
-    await invoke('update_settings', { mtu, splitMode, reconnect: running });
+    await invoke('update_settings', { mtu, splitMode, wowApps: preset === 'wow' ? getWowApps() : null, reconnect: running });
     showMessage('Settings saved', false);
     if (running) showMessage('Reconnecting...', false);
   } catch (e) {
@@ -710,8 +730,12 @@ document.querySelectorAll('.h2-preset-card').forEach(card => {
 
   // Highlight the active split preset card on launch (full tunnel by default)
   try {
-    const splitSettings = await invoke<{ split_mode: string }>('get_split_settings');
+    const splitSettings = await invoke<{ split_mode: string; wow_apps?: string[] }>('get_split_settings');
     updateSplitPresetUI(splitSettings.split_mode || 'full');
+    const apps = splitSettings.wow_apps || ['discord', 'chrome', 'telegram'];
+    wowAppDiscord.checked = apps.includes('discord');
+    wowAppChrome.checked = apps.includes('chrome');
+    wowAppTelegram.checked = apps.includes('telegram');
   } catch {
     updateSplitPresetUI('full');
   }

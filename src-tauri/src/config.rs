@@ -18,6 +18,8 @@ pub struct Config {
     pub mtu: Option<u32>,
     #[serde(default)]
     pub split_mode: String, // "full", "wow"
+    #[serde(default)]
+    pub wow_apps: Vec<String>, // checked app ids for WoW split: "discord","chrome","telegram"
 
     pub mode: String,
 
@@ -109,6 +111,24 @@ pub fn save_split_mode(split_mode: &str) -> Result<()> {
 /// Load split mode from config.json
 pub fn load_split_mode() -> String {
     load_config_json()["split_mode"].as_str().unwrap_or("full").to_string()
+}
+
+/// Save WoW checked app ids (Vec of "discord"/"chrome"/"telegram") to config.json
+pub fn save_wow_apps(apps: &[String]) -> Result<()> {
+    let mut existing = load_config_json();
+    existing["wow_apps"] = serde_json::Value::Array(
+        apps.iter().map(|a| serde_json::Value::String(a.clone())).collect(),
+    );
+    save_config_json(&existing)
+}
+
+/// Load WoW checked app ids; defaults to all three checked if absent
+pub fn load_wow_apps() -> Vec<String> {
+    let arr = load_config_json()["wow_apps"].as_array();
+    match arr {
+        Some(a) => a.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect(),
+        None => vec!["discord".to_string(), "chrome".to_string(), "telegram".to_string()],
+    }
 }
 
 /// Profile descriptor returned by [`parse_profile`]
@@ -205,6 +225,7 @@ fn default_config() -> Config {
         stls_sni: String::new(),
         mtu: None,
         split_mode: "full".to_string(),
+        wow_apps: vec!["discord".to_string(), "chrome".to_string(), "telegram".to_string()],
         mode: "shadowtls".to_string(),
         h2_port: 40001,
         h2_password: String::new(),
@@ -224,6 +245,7 @@ pub fn get_active_config() -> Config {
 
     // Split mode from config.json overrides profile default
     cfg.split_mode = load_split_mode();
+    cfg.wow_apps = load_wow_apps();
 
     cfg
 }
