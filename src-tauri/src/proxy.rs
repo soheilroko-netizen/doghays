@@ -301,7 +301,16 @@ impl ProxyManager {
                     .filter(|s| !s.is_empty())
                     .collect();
                 if !pnames.is_empty() {
-                    rule.insert("process_name".into(), serde_json::json!(pnames));
+                    // Case-insensitive matching: sing-box process_name is
+                    // case-sensitive on Windows, so also emit lowercase variants.
+                    let mut names = pnames.clone();
+                    for n in &pnames {
+                        let low = n.to_lowercase();
+                        if !names.contains(&low) {
+                            names.push(low);
+                        }
+                    }
+                    rule.insert("process_name".into(), serde_json::json!(names));
                     has_app_rules = true;
                 }
                 if !ppaths.is_empty() {
