@@ -598,7 +598,7 @@ btnSaveSettings.addEventListener('click', async () => {
     const splitMode = activeCard ? activeCard.dataset.preset || 'full' : 'full';
 
     const running = await invoke('get_status');
-    await invoke('update_settings', { mtu, splitMode, wowApps: preset === 'wow' ? getWowApps() : null, reconnect: running });
+    await invoke('update_settings', { mtu, splitMode, wowApps: splitMode === 'wow' ? getWowApps() : null, reconnect: running });
     showMessage('Settings saved', false);
     if (running) showMessage('Reconnecting...', false);
   } catch (e) {

@@ -59,19 +59,21 @@
             <input type="number" id="setting-mtu" placeholder="Auto" style="width:100%;padding:6px;background:#0f0f1e;color:#fff;border:1px solid #444;border-radius:4px;font-size:12px;" />
           </div>
 
-          <!-- WoW Mode: info label + app checkboxes -->
+          <!-- WoW Mode: clean app checkboxes -->
           <div id="wow-info-container" style="display:none;margin-bottom:8px;padding:8px;background:#0f0f1e;border-radius:4px;border:1px solid #444;">
             <label style="display:block;color:#888;font-size:11px;margin-bottom:4px;">WoW Split Mode</label>
-            <div style="color:#4ade80;font-size:11px;margin-bottom:6px;">Blizzard domains use VPN. Check apps to also tunnel them.</div>
-            <label style="display:flex;align-items:center;gap:6px;color:#ddd;font-size:12px;margin:3px 0;cursor:pointer;">
-              <input type="checkbox" id="wow-app-discord" checked /> Discord <span style="color:#666;font-size:10px;">(Discord.exe, Update.exe)</span>
-            </label>
-            <label style="display:flex;align-items:center;gap:6px;color:#ddd;font-size:12px;margin:3px 0;cursor:pointer;">
-              <input type="checkbox" id="wow-app-chrome" checked /> Chrome <span style="color:#666;font-size:10px;">(chrome.exe)</span>
-            </label>
-            <label style="display:flex;align-items:center;gap:6px;color:#ddd;font-size:12px;margin:3px 0;cursor:pointer;">
-              <input type="checkbox" id="wow-app-telegram" checked /> Telegram <span style="color:#666;font-size:10px;">(Telegram.exe)</span>
-            </label>
+            <div style="color:#4ade80;font-size:11px;margin-bottom:8px;">Blizzard domains use VPN. Check apps to also tunnel them.</div>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+              <label style="display:flex;align-items:center;gap:10px;color:#ddd;font-size:13px;cursor:pointer;">
+                <input type="checkbox" id="wow-app-discord" checked /> <span>Discord</span>
+              </label>
+              <label style="display:flex;align-items:center;gap:10px;color:#ddd;font-size:13px;cursor:pointer;">
+                <input type="checkbox" id="wow-app-chrome" checked /> <span>Chrome</span>
+              </label>
+              <label style="display:flex;align-items:center;gap:10px;color:#ddd;font-size:13px;cursor:pointer;">
+                <input type="checkbox" id="wow-app-telegram" checked /> <span>Telegram</span>
+              </label>
+            </div>
           </div>
 
           <div style="display:flex;gap:8px;margin-bottom:8px;">
