@@ -90,7 +90,8 @@ pub fn clear_doh_dns() -> Result<String> {
 pub fn doh_active() -> Result<bool> {
     let iface = active_adapter()?;
     let out = run_hidden(&["netsh", "interface", "ipv4", "show", "dnsservers", "name=", &iface])?;
-    // Static config shows "Configured DNS servers" with a listed address;
-    // DHCP shows "DHCP-configured DNS servers".
-    Ok(out.contains("Configured DNS servers"))
+    // Windows netsh prints "Statically Configured DNS Servers" for static DNS
+    // and "DHCP-configured DNS servers" for DHCP. Match case-insensitively.
+    let lower = out.to_lowercase();
+    Ok(lower.contains("statically configured dns servers") || lower.contains("configured dns servers"))
 }
