@@ -276,6 +276,8 @@ impl ProxyManager {
                 "blizzard.com",
                 "worldofwarcraft.com",
                 "akamaized.net",
+                "connection.wow",
+                "realmlist.wow",
             ];
             for domain in wow_domains {
                 arr.insert(3, serde_json::json!({"domain_suffix": [domain], "outbound": default_direct}));
