@@ -313,7 +313,8 @@ impl ProxyManager {
                     {"type": "https", "tag": "remote-doh", "server": "8.8.8.8", "server_port": 443, "path": "/dns-query", "detour": final_outbound}
                 ],
                 "final": "remote-doh",
-                "reverse_mapping": true
+                "reverse_mapping": true,
+                "strategy": "ipv4_only"
             },
             "inbounds": [{
                 "type": "tun", "tag": "tun-in",
