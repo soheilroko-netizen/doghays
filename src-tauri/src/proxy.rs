@@ -382,26 +382,34 @@ impl ProxyManager {
     }
 
     fn get_bundled_or_download(&self) -> Result<PathBuf> {
-        let candidates = [
-            // Next to exe
-            std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("sing-box.exe"))),
-            // Next to exe/resources (Tauri bundle layout)
-            std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("resources").join("sing-box.exe"))),
-            // Next to exe/bin (Tauri resources with bin/ prefix)
-            std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("bin").join("sing-box.exe"))),
-            // Relative paths
-            Some(PathBuf::from("bin").join("sing-box.exe")),
-            Some(PathBuf::from("sing-box.exe")),
-            // Cached in config dir
-            Some(self.sing_box_exe()),
-        ];
-        for path in candidates.iter().flatten() {
-            if path.exists() {
-                println!("[stls] using sing-box: {}", path.display());
-                return Ok(path.clone());
+        let marker = self.config_dir.join("sing-box.version");
+        let cached_ok = std::fs::read_to_string(&marker).map(|v| v.trim() == SING_BOX_VERSION).unwrap_or(false);
+
+        // Only trust a bundled/existing binary if it matches the pinned version.
+        // Otherwise fall through to download_sing_box (which re-fetches 1.13.19).
+        if cached_ok {
+            let candidates = [
+                // Next to exe
+                std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("sing-box.exe"))),
+                // Next to exe/resources (Tauri bundle layout)
+                std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("resources").join("sing-box.exe"))),
+                // Next to exe/bin (Tauri resources with bin/ prefix)
+                std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("bin").join("sing-box.exe"))),
+                // Relative paths
+                Some(PathBuf::from("bin").join("sing-box.exe")),
+                Some(PathBuf::from("sing-box.exe")),
+                // Cached in config dir
+                Some(self.sing_box_exe()),
+            ];
+            for path in candidates.iter().flatten() {
+                if path.exists() {
+                    println!("[stls] using sing-box: {}", path.display());
+                    return Ok(path.clone());
+                }
             }
+        } else {
+            println!("[stls] cached sing-box version mismatch or missing, (re)downloading...");
         }
-        println!("[stls] no bundled sing-box found, downloading...");
         self.download_sing_box()
     }
 

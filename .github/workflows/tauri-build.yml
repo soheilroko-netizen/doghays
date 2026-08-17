@@ -29,10 +29,10 @@ jobs:
       - name: Download sing-box
         shell: pwsh
         run: |
-          $release = Invoke-RestMethod "https://api.github.com/repos/SagerNet/sing-box/releases/latest" -Headers @{"User-Agent"="stls"}
-          $tag = $release.tag_name.TrimStart('v')
+          $tag = "1.13.19"
           Write-Host "sing-box version: $tag"
           $zip = "sing-box-$tag-windows-amd64.zip"
+          $release = Invoke-RestMethod "https://api.github.com/repos/SagerNet/sing-box/releases/tags/v$tag" -Headers @{"User-Agent"="stls"}
           $asset = $release.assets | Where-Object { $_.name -eq $zip } | Select-Object -First 1
           if (-not $asset) { throw "Asset $zip not found" }
           Write-Host "Downloading $($asset.browser_download_url)"
