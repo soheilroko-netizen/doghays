@@ -424,7 +424,7 @@ impl ProxyManager {
         println!("[stls] downloading sing-box {version}...");
         let zip_name = format!("sing-box-{version}-windows-amd64.zip");
         let url =
-            format!("https://github.com/SagerNet/sing-box/releases/download/{tag}/{zip_name}");
+            format!("https://github.com/SagerNet/sing-box/releases/download/v{version}/{zip_name}");
 
         let bytes = client.get(&url).send()?.error_for_status()?.bytes()?;
 
