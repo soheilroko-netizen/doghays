@@ -262,7 +262,9 @@ impl ProxyManager {
         let mut route_rules = serde_json::json!([
             {"action": "sniff"},
             {"type": "logical", "mode": "or", "rules": [{"protocol": "dns"}, {"port": 53}], "action": "hijack-dns"},
-            {"ip_cidr": bypass_cidrs, "outbound": "direct"}
+            {"ip_cidr": bypass_cidrs, "outbound": "direct"},
+            {"ip_is_private": true, "action": "route", "outbound": "direct"},
+            {"type": "logical", "mode": "or", "rules": [{"port": 853}, {"protocol": "stun"}], "action": "reject"}
         ]);
 
         // App-rule flag (set by WoW block below)
@@ -275,7 +277,25 @@ impl ProxyManager {
                 "battle.net",
                 "blizzard.com",
                 "worldofwarcraft.com",
+                "wow.com",
+                "battlenet.com",
                 "akamaized.net",
+                "akamaihd.net",
+                "akadns.net",
+                "akamai.net",
+                "edgecastcdn.net",
+                "edgecast.net",
+                "llnw.net",
+                "llnw.com",
+                "limelight.net",
+                "cloudfront.net",
+                "fastly.net",
+                "level3.com",
+                "level3.net",
+                "blizzardcdn.com",
+                "blizzard.112.2o7.net",
+                "2o7.net",
+                "omtrdc.net",
                 "connection.wow",
                 "realmlist.wow",
             ];
@@ -310,7 +330,7 @@ impl ProxyManager {
             },
             "dns": {
                 "servers": [
-                    {"type": "https", "tag": "remote-doh", "server": "8.8.8.8", "server_port": 443, "path": "/dns-query", "detour": final_outbound}
+                    {"type": "https", "tag": "remote-doh", "server": "dns.google", "server_port": 443, "path": "/dns-query", "detour": final_outbound}
                 ],
                 "final": "remote-doh",
                 "reverse_mapping": true,
@@ -319,7 +339,12 @@ impl ProxyManager {
             "inbounds": [{
                 "type": "tun", "tag": "tun-in",
                 "address": ["172.19.0.1/30"],
-                "mtu": c.mtu.unwrap_or(1400),
+                // MTU 1360 = safe clamp for PMTU/blackhole on the WoW loading
+                // screen (large asset transfers stall when 1400-byte segments
+                // exceed the real path MTU and ICMP PMTU is broken through TUN).
+                // NOTE: tcp_mss_fix is NOT available in sing-box 1.13.x — lower
+                // MTU is the 1.13-compatible MSS mitigation.
+                "mtu": c.mtu.unwrap_or(1360),
                 "auto_route": true, "strict_route": true, "stack": c.tun_stack.as_str()
             }],
             "outbounds": outbounds,
@@ -404,50 +429,63 @@ impl ProxyManager {
 
     fn download_sing_box(&self) -> Result<PathBuf> {
         let exe = self.sing_box_exe();
+
+        // Pinned version. Unpinned "latest" can pull 1.14+ whose config schema
+        // changes silently break this hand-built config.
+        const PINNED_VERSION: &str = "1.13.19";
+
+        // Stale-binary guard: if a cached exe exists but reports a different
+        // version (e.g. an old 1.13.x or a pulled 1.14), drop it and re-fetch.
         if exe.exists() {
-            return Ok(exe);
-        }
-
-        println!("[stls] resolving latest sing-box release...");
-        let client = reqwest::blocking::Client::builder()
-            .user_agent("stls")
-            .build()?;
-
-        let rel: serde_json::Value = client
-            .get("https://api.github.com/repos/SagerNet/sing-box/releases/latest")
-            .send()?
-            .json()?;
-
-        let tag = rel["tag_name"]
-            .as_str()
-            .ok_or_else(|| anyhow::anyhow!("no tag"))?;
-        let version = tag.trim_start_matches('v');
-
-        println!("[stls] downloading sing-box {version}...");
-        let zip_name = format!("sing-box-{version}-windows-amd64.zip");
-        let url =
-            format!("https://github.com/SagerNet/sing-box/releases/download/{tag}/{zip_name}");
-
-        let bytes = client.get(&url).send()?.error_for_status()?.bytes()?;
-
-        println!("[stls] extracting...");
-        let reader = std::io::Cursor::new(bytes);
-        let mut archive = zip::ZipArchive::new(reader)?;
-
-        for i in 0..archive.len() {
-            let mut file = archive.by_index(i)?;
-            let name = file.name().to_string();
-            if name.ends_with("sing-box.exe") {
-                let mut buf = Vec::new();
-                file.read_to_end(&mut buf)?;
-                let mut out = fs::File::create(&exe)?;
-                out.write_all(&buf)?;
-                println!("[stls] sing-box ready");
-                return Ok(exe);
+            if let Ok(out) = std::process::Command::new(&exe)
+                .arg("version")
+                .output()
+            {
+                let txt = String::from_utf8_lossy(&out.stdout);
+                if !txt.contains(PINNED_VERSION) {
+                    println!("[stls] cached sing-box mismatch, removing");
+                    let _ = fs::remove_file(&exe);
+                }
             }
         }
 
-        bail!("sing-box.exe not found in release")
+        if !exe.exists() {
+            println!("[stls] downloading sing-box {PINNED_VERSION}...");
+            let client = reqwest::blocking::Client::builder()
+                .user_agent("stls")
+                .build()?;
+
+            let tag = format!("v{PINNED_VERSION}");
+            let zip_name = format!("sing-box-{PINNED_VERSION}-windows-amd64.zip");
+            let url = format!(
+                "https://github.com/SagerNet/sing-box/releases/download/{tag}/{zip_name}"
+            );
+
+            let bytes = client.get(&url).send()?.error_for_status()?.bytes()?;
+
+            println!("[stls] extracting...");
+            let reader = std::io::Cursor::new(bytes);
+            let mut archive = zip::ZipArchive::new(reader)?;
+
+            for i in 0..archive.len() {
+                let mut file = archive.by_index(i)?;
+                let name = file.name().to_string();
+                if name.ends_with("sing-box.exe") {
+                    let mut buf = Vec::new();
+                    file.read_to_end(&mut buf)?;
+                    let mut out = fs::File::create(&exe)?;
+                    out.write_all(&buf)?;
+                    println!("[stls] sing-box ready");
+                    break;
+                }
+            }
+
+            if !exe.exists() {
+                bail!("sing-box.exe not found in release");
+            }
+        }
+
+        Ok(exe)
     }
 }
 
