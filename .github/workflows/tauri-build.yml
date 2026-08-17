@@ -1,9 +1,9 @@
 name: Tauri Build
 on:
   push:
-    branches: [main, v2, v4, v5, v6, v12, kiri, h2, h2-optimized-ci-test, final, ui-improvements, feature/netherlands-germany3-profiles]
+    branches: [main, v2, v4, v5, v6, v12, kiri, h2, h2-optimized-ci-test, final, ui-improvements, feature/netherlands-germany3-profiles, rebuild]
   pull_request:
-    branches: [main, v2, v4, v5, v6, v12, kiri, h2, final, ui-improvements, feature/netherlands-germany3-profiles]
+    branches: [main, v2, v4, v5, v6, v12, kiri, h2, final, ui-improvements, feature/netherlands-germany3-profiles, rebuild]
 
 jobs:
   build:
@@ -29,14 +29,15 @@ jobs:
       - name: Download sing-box
         shell: pwsh
         run: |
-          $release = Invoke-RestMethod "https://api.github.com/repos/SagerNet/sing-box/releases/latest" -Headers @{"User-Agent"="stls"}
-          $tag = $release.tag_name.TrimStart('v')
+          # Pinned to 1.13.19 — must match the version the app runtime pins
+          # (src-tauri/src/proxy.rs). Unpinned "latest" can pull 1.14+ whose
+          # config schema changes silently break the bundled config check/build.
+          $tag = "1.13.19"
           Write-Host "sing-box version: $tag"
           $zip = "sing-box-$tag-windows-amd64.zip"
-          $asset = $release.assets | Where-Object { $_.name -eq $zip } | Select-Object -First 1
-          if (-not $asset) { throw "Asset $zip not found" }
-          Write-Host "Downloading $($asset.browser_download_url)"
-          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile sb.zip
+          $asset = "https://github.com/SagerNet/sing-box/releases/download/v$tag/$zip"
+          Write-Host "Downloading $asset"
+          Invoke-WebRequest -Uri $asset -OutFile sb.zip
           New-Item -ItemType Directory -Force src-tauri/bin | Out-Null
           tar -xf sb.zip -C src-tauri/bin --strip-components=1 "sing-box-$tag-windows-amd64/sing-box.exe"
           Get-ChildItem src-tauri/bin/sing-box.exe | Select-Object Name, Length
