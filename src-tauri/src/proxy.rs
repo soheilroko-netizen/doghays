@@ -308,7 +308,7 @@ impl ProxyManager {
             },
             "dns": {
                 "servers": [
-                    {"type": "https", "tag": "remote-doh", "server": "1.1.1.1", "detour": final_outbound}
+                    {"type": "https", "tag": "remote-doh", "server": "8.8.8.8", "server_port": 443, "path": "/dns-query", "detour": final_outbound}
                 ],
                 "final": "remote-doh",
                 "reverse_mapping": true
