@@ -59,6 +59,15 @@
             <input type="number" id="setting-mtu" placeholder="Auto" style="width:100%;padding:6px;background:#0f0f1e;color:#fff;border:1px solid #444;border-radius:4px;font-size:12px;" />
           </div>
 
+          <div style="margin-bottom:8px;">
+            <label style="display:block;color:#888;font-size:11px;margin-bottom:4px;">TUN Stack</label>
+            <select id="setting-tun-stack" style="width:100%;padding:6px;background:#0f0f1e;color:#fff;border:1px solid #444;border-radius:4px;font-size:12px;">
+              <option value="system">System (recommended for games)</option>
+              <option value="mixed">Mixed</option>
+              <option value="gvisor">gVisor</option>
+            </select>
+          </div>
+
           <!-- WoW Mode: clean app checkboxes -->
           <div id="wow-info-container" style="display:none;margin-bottom:8px;padding:8px;background:#0f0f1e;border-radius:4px;border:1px solid #444;">
             <label style="display:block;color:#888;font-size:11px;margin-bottom:4px;">WoW Split Mode</label>

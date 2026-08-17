@@ -30,6 +30,8 @@ pub struct Config {
     pub h2_insecure: bool,
     pub h2_obfs: String,
     pub h2_obfs_password: String,
+    #[serde(default = "tun_stack_default")]
+    pub tun_stack: String, // "system", "mixed", "gvisor"
     #[serde(default = "h2_mbps_up_default")]
     pub h2_up_mbps: u32,
     #[serde(default = "h2_mbps_down_default")]
@@ -100,6 +102,21 @@ pub fn h2_mbps_up_default() -> u32 { 40 }
 
 /// Default Hysteria2 download bandwidth in Mbps
 pub fn h2_mbps_down_default() -> u32 { 80 }
+
+/// Default TUN stack: "system" works best for Windows games + process-based routing
+pub fn tun_stack_default() -> String { "system".to_string() }
+
+/// Save TUN stack to config.json
+pub fn save_tun_stack(stack: &str) -> Result<()> {
+    let mut existing = load_config_json();
+    existing["tun_stack"] = serde_json::Value::String(stack.to_string());
+    save_config_json(&existing)
+}
+
+/// Load TUN stack from config.json (defaults to "system")
+pub fn load_tun_stack() -> String {
+    load_config_json()["tun_stack"].as_str().unwrap_or("system").to_string()
+}
 
 /// Save split mode to config.json
 pub fn save_split_mode(split_mode: &str) -> Result<()> {
@@ -234,6 +251,7 @@ fn default_config() -> Config {
         h2_insecure: false,
         h2_obfs: String::new(),
         h2_obfs_password: String::new(),
+        tun_stack: tun_stack_default(),
         h2_up_mbps: up,
         h2_down_mbps: down,
     }
@@ -247,6 +265,7 @@ pub fn get_active_config() -> Config {
     // Split mode from config.json overrides profile default
     cfg.split_mode = load_split_mode();
     cfg.wow_apps = load_wow_apps();
+    cfg.tun_stack = load_tun_stack();
 
     cfg
 }

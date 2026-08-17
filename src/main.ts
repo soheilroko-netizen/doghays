@@ -56,6 +56,7 @@ interface Config {
   h2_obfs_password: string;
   h2_up_mbps: number;
   h2_down_mbps: number;
+  tun_stack?: string;
 }
 
 // ── Elements ─────────────────────────────────────────────
@@ -117,6 +118,7 @@ const wowAppDiscord = document.getElementById('wow-app-discord') as HTMLInputEle
 const wowAppChrome = document.getElementById('wow-app-chrome') as HTMLInputElement;
 const wowAppTelegram = document.getElementById('wow-app-telegram') as HTMLInputElement;
 const settingMtu = document.getElementById('setting-mtu') as HTMLInputElement;
+const settingTunStack = document.getElementById('setting-tun-stack') as HTMLSelectElement;
 const btnSaveSettings = document.getElementById('btn-save-settings')!;
 const btnDoh = document.getElementById('btn-doh') as HTMLButtonElement;
 
@@ -544,6 +546,7 @@ async function loadSettings() {
   try {
     const cfg = await invoke<Config>('get_config');
     settingMtu.value = cfg.mtu ? String(cfg.mtu) : '';
+    settingTunStack.value = cfg.tun_stack || 'system';
 
     // Load split mode
     const splitSettings = await invoke<{ split_mode: string; wow_apps?: string[] }>('get_split_settings');
@@ -590,6 +593,7 @@ splitPresetCards.forEach(card => {
       await invoke('update_settings', {
         mtu: settingMtu.value ? parseInt(settingMtu.value, 10) : null,
         splitMode: preset,
+        tunStack: settingTunStack.value,
         wowApps: preset === 'wow' ? getWowApps() : null,
         reconnect: running
       });
@@ -625,7 +629,7 @@ btnSaveSettings.addEventListener('click', async () => {
     const splitMode = activeCard ? activeCard.dataset.preset || 'full' : 'full';
 
     const running = await invoke('get_status');
-    await invoke('update_settings', { mtu, splitMode, wowApps: splitMode === 'wow' ? getWowApps() : null, reconnect: running });
+    await invoke('update_settings', { mtu, splitMode, tunStack: settingTunStack.value, wowApps: splitMode === 'wow' ? getWowApps() : null, reconnect: running });
     showMessage('Settings saved', false);
     if (running) showMessage('Reconnecting...', false);
   } catch (e) {

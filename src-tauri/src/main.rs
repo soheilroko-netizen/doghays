@@ -388,7 +388,7 @@ fn get_h2_speeds() -> Result<serde_json::Value, String> {
 }
 
 #[tauri::command]
-fn update_settings(mtu: Option<u32>, split_mode: String, reconnect: bool, wow_apps: Option<Vec<String>>, state: State<AppState>, app: tauri::AppHandle) -> Result<bool, String> {
+fn update_settings(mtu: Option<u32>, split_mode: String, reconnect: bool, wow_apps: Option<Vec<String>>, tun_stack: Option<String>, state: State<AppState>, app: tauri::AppHandle) -> Result<bool, String> {
     // Validate MTU
     if let Some(m) = mtu {
         if m < 576 || m > 9000 {
@@ -400,10 +400,22 @@ fn update_settings(mtu: Option<u32>, split_mode: String, reconnect: bool, wow_ap
     if !["full", "wow"].contains(&split_mode.as_str()) {
         return Err("Invalid split mode".into());
     }
+
+    // Validate TUN stack (system / mixed / gvisor)
+    if let Some(ref s) = tun_stack {
+        if !["system", "mixed", "gvisor"].contains(&s.as_str()) {
+            return Err("Invalid TUN stack".into());
+        }
+    }
     
     // Persist split mode
     config::save_split_mode(&split_mode).map_err(|e| e.to_string())?;
 
+    // Persist TUN stack
+    if let Some(ref s) = tun_stack {
+        config::save_tun_stack(s).map_err(|e| e.to_string())?;
+    }
+    
     // Persist WoW checked apps when in wow mode (default all three when none passed)
     if split_mode == "wow" {
         let apps = wow_apps.unwrap_or_else(|| {

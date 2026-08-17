@@ -318,8 +318,8 @@ impl ProxyManager {
             "inbounds": [{
                 "type": "tun", "tag": "tun-in",
                 "address": ["172.19.0.1/30"],
-                "mtu": c.mtu,
-                "auto_route": true, "strict_route": true, "stack": "mixed"
+                "mtu": c.mtu.unwrap_or(1400),
+                "auto_route": true, "strict_route": true, "stack": c.tun_stack.as_str()
             }],
             "outbounds": outbounds,
             "route": {
