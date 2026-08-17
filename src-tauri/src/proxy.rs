@@ -28,6 +28,8 @@ fn no_window(cmd: &mut Command) -> &mut Command {
 const TUN_FALLBACK_CIDR: &str = "198.18.0.0/15";
 /// Static placeholder IP used when no server IP was resolved
 const TUN_FALLBACK_IP: &str = "198.18.0.0";
+/// Pinned sing-box version (must support address_resolver, added in 1.12.0)
+const SING_BOX_VERSION: &str = "1.13.19";
 
 pub struct ProxyManager {
     child: Arc<Mutex<Option<Child>>>,
@@ -405,24 +407,19 @@ impl ProxyManager {
 
     fn download_sing_box(&self) -> Result<PathBuf> {
         let exe = self.sing_box_exe();
-        if exe.exists() {
+        let marker = self.config_dir.join("sing-box.version");
+        // Re-download if missing OR cached version differs from pinned
+        let needs_dl = !exe.exists() || std::fs::read_to_string(&marker).map(|v| v.trim() != SING_BOX_VERSION).unwrap_or(true);
+        if !needs_dl {
             return Ok(exe);
         }
 
-        println!("[stls] resolving latest sing-box release...");
+        println!("[stls] resolving sing-box release...");
         let client = reqwest::blocking::Client::builder()
             .user_agent("stls")
             .build()?;
 
-        let rel: serde_json::Value = client
-            .get("https://api.github.com/repos/SagerNet/sing-box/releases/latest")
-            .send()?
-            .json()?;
-
-        let tag = rel["tag_name"]
-            .as_str()
-            .ok_or_else(|| anyhow::anyhow!("no tag"))?;
-        let version = tag.trim_start_matches('v');
+        let version = SING_BOX_VERSION;
 
         println!("[stls] downloading sing-box {version}...");
         let zip_name = format!("sing-box-{version}-windows-amd64.zip");
@@ -443,6 +440,8 @@ impl ProxyManager {
                 file.read_to_end(&mut buf)?;
                 let mut out = fs::File::create(&exe)?;
                 out.write_all(&buf)?;
+                // Persist pinned version so a stale binary isn't reused
+                let _ = std::fs::write(&marker, SING_BOX_VERSION);
                 println!("[stls] sing-box ready");
                 return Ok(exe);
             }
