@@ -1,7 +1,1 @@
-/pat/
-/target/
-/src-tauri/target/
-/dist/
-*.log
-node_modules/
-*.pem
+artifacts/
