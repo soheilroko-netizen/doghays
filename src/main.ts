@@ -747,7 +747,7 @@ splitPresetCards.forEach(card => {
       });
       showMessage('Settings saved', false);
       if (running) {
-        showMessage('Reconnecting with new split settings...', false);
+        showMessage('Reconnected with new split settings', false);
       }
     } catch (e) {
       showMessage(`Failed: ${e}`, true);
@@ -780,7 +780,7 @@ btnSaveSettings.addEventListener('click', async () => {
     if (splitMode === 'wow' && !validateWowSelection()) return;
     await invoke('update_settings', { mtu, splitMode, tunStack: settingTunStack.value, wowApps: splitMode === 'wow' ? getWowApps() : null, wowDomains: splitMode === 'wow' ? getWowDomains() : null, reconnect: running });
     showMessage('Settings saved', false);
-    if (running) showMessage('Reconnecting...', false);
+    if (running) showMessage('Reconnected', false);
   } catch (e) {
     showMessage(`Failed: ${e}`, true);
   }

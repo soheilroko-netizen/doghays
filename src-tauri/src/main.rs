@@ -492,14 +492,32 @@ fn update_settings(
         }
     }
     
-    // Reconnect if proxy is running and requested
+    // Reconnect if proxy is running and requested.
+    // IMPORTANT: surface a start failure instead of swallowing it. A swallowed
+    // error leaves the tunnel silently dead (real IP leaks, watchdog later
+    // trips). Also give the TUN adapter a moment to release after stop before
+    // rebinding — a stop->start race on Windows makes start fail spuriously.
     let restarted = if reconnect {
         let was_running = state.proxy.lock().unwrap().is_running();
         if was_running {
             let _ = stop_proxy_inner(&state);
-            let _ = start_proxy_inner(&app, &state);
+            // Settle so the TUN adapter / previous process fully release.
+            std::thread::sleep(std::time::Duration::from_millis(700));
+            let mut start_result: Result<String, String> = Err("not attempted".into());
+            for attempt in 0..3 {
+                match start_proxy_inner(&app, &state) {
+                    Ok(msg) => { start_result = Ok(msg); break; }
+                    Err(e) => {
+                        start_result = Err(e);
+                        if attempt < 2 {
+                            std::thread::sleep(std::time::Duration::from_millis(700));
+                        }
+                    }
+                }
+            }
             update_tray_state(&app);
-            true
+            // Propagate the start failure so the UI shows the real reason.
+            start_result.map(|_| true)?
         } else {
             false
         }
