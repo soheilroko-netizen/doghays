@@ -397,12 +397,15 @@ fn real_ping(state: State<AppState>) -> Result<String, String> {
         return Err("VPN not connected".into());
     }
 
-    if let Err(e) = state.http_client.get(PING_TARGET).send() {
-        return Err(format!("warmup failed: {}", e));
-    }
-
+    // Single request with a hard 2s timeout so a dead/stalled link fails fast
+    // instead of blocking the (shared) command channel for up to 6s (two GETs).
     let start = Instant::now();
-    let resp = state.http_client.get(PING_TARGET).send().map_err(|e| format!("measure failed: {}", e))?;
+    let resp = state
+        .http_client
+        .get(PING_TARGET)
+        .timeout(std::time::Duration::from_secs(2))
+        .send()
+        .map_err(|e| format!("ping failed: {}", e))?;
     if !resp.status().is_success() && resp.status().as_u16() != 204 {
         return Err(format!("bad status: {}", resp.status()));
     }

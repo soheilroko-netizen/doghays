@@ -331,17 +331,22 @@ async function sampleLoss() {
 }
 
 async function doPing() {
+  // Overlap guard: if the previous ping is still in flight (e.g. a stalled
+  // backend call), skip this tick instead of stacking calls on the channel.
+  if (pingInFlight) return;
+  pingInFlight = true;
   try {
     const result = await invoke<string>('real_ping');
     pingValue.textContent = result;
-    
+
     // Mark that we have a ping response
     hasPingResponse = true;
-    
+    lastGoodPingTs = Date.now(); // watchdog: record last good ping
+
     // Update ping bars based on latency
     const pingMs = parseInt(result.replace('ms', ''));
     const bars = document.querySelectorAll('.ping-bar');
-    
+
     bars.forEach(bar => {
       const threshold = parseInt((bar as HTMLElement).dataset.threshold || '0');
       if (pingMs >= threshold) {
@@ -363,22 +368,42 @@ async function doPing() {
     document.querySelectorAll('.ping-bar').forEach(bar => bar.classList.remove('active'));
     const triangle = document.getElementById('ping-triangle');
     if (triangle) triangle.classList.remove('active');
+  } finally {
+    pingInFlight = false;
+  }
+}
+
+// ── Auto-disconnect watchdog ─────────────────────────────────
+async function watchdogCheck() {
+  if (lastGoodPingTs === 0 || watchdogTripped) return; // not yet connected, or already tripped
+  let running = false;
+  try { running = await invoke<boolean>('get_status'); } catch { return; }
+  if (!running) { lastGoodPingTs = 0; return; } // user disconnected / already down
+  if (Date.now() - lastGoodPingTs > NO_PING_DISCONNECT_MS) {
+    watchdogTripped = true;
+    try { await invoke('stop_proxy'); } catch { /* ignore */ }
+    showMessage('VPN auto-disconnected: no ping for 10s — you are no longer protected.', true);
   }
 }
 
 function startPingLoop() {
   stopPingLoop();
+  watchdogTripped = false;
+  lastGoodPingTs = 0;
   doPing();
   sampleLoss();
   pingTimer = setInterval(doPing, PING_INTERVAL_MS);
   lossTimer = setInterval(sampleLoss, 2000);
+  watchTimer = setInterval(watchdogCheck, 1000);
 }
 
 function stopPingLoop() {
   if (pingTimer) clearInterval(pingTimer);
   if (lossTimer) clearInterval(lossTimer);
+  if (watchTimer) clearInterval(watchTimer);
   pingTimer = null;
   lossTimer = null;
+  watchTimer = null;
 }
 
 // ── Status update (every 2s) ─────────────────────────────────
@@ -409,6 +434,15 @@ let uptimeRefresh = Date.now();
 let isConnecting = false;
 let hasPingResponse = false;
 
+// Auto-disconnect watchdog: armed only after we've seen at least one good ping.
+// If the link then goes silent (no successful ping) for this long, tear the
+// tunnel down so the UI never hangs waiting on a dead/stalled connection.
+const NO_PING_DISCONNECT_MS = 10000;
+let lastGoodPingTs = 0;   // timestamp of last successful ping (0 = not yet connected)
+let watchdogTripped = false;
+let watchTimer: ReturnType<typeof setInterval> | null = null;
+let pingInFlight = false; // overlap guard: skip a tick if the previous one is still running
+
 async function updateStatus() {
   try {
     const s = await invoke<FullStatus>('get_full_status');
@@ -428,6 +462,7 @@ async function updateStatus() {
       statusDot.classList.remove('connected');
       statusDot.style.background = '';
       hasPingResponse = false;
+      lastGoodPingTs = 0; // watchdog disarms when not running
     }
     
     statusAddress.textContent = s.running && s.server ? s.server : '';

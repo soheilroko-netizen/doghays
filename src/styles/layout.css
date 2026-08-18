@@ -475,14 +475,16 @@
   display: flex;
   justify-content: space-between;
   gap: 6px;
-  font-size: 11px;
+  font-size: 14px;
+  font-weight: 500;
   color: var(--text-secondary);
   flex-wrap: wrap;
 }
 
 .ping-stats b {
   font-family: 'Courier New', monospace;
-  font-weight: 600;
+  font-weight: 700;
+  font-size: 15px;
   color: var(--text-primary);
 }
 
