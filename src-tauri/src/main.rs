@@ -157,21 +157,49 @@ fn start_proxy(app: tauri::AppHandle, state: State<AppState>) -> Result<String, 
 
 fn start_proxy_inner(app: &tauri::AppHandle, state: &State<AppState>) -> Result<String, String> {
     let mut proxy = state.proxy.lock().unwrap();
-    let result = proxy.start().map_err(|e| e.to_string())?;
-    *state.started_at.lock().unwrap() = Some(Instant::now());
-    *state.is_running_cache.lock().unwrap() = proxy.is_running();
-    drop(proxy);
-    update_tray_state(app);
-    Ok(result)
+    let result = proxy.start();
+    match result {
+        Ok(msg) => {
+            *state.started_at.lock().unwrap() = Some(Instant::now());
+            *state.is_running_cache.lock().unwrap() = proxy.is_running();
+            drop(proxy);
+            update_tray_state(app);
+            Ok(msg)
+        }
+        Err(e) => {
+            // Classify the technical error into a friendly user message.
+            // The full error remains in the backend debug log.
+            let friendly = {
+                let p = state.proxy.lock().unwrap();
+                p.classify_error(&e)
+            };
+            *state.is_running_cache.lock().unwrap() = false;
+            *state.started_at.lock().unwrap() = None;
+            drop(proxy);
+            update_tray_state(app);
+            Err(friendly)
+        }
+    }
 }
 
 fn stop_proxy_inner(state: &State<AppState>) -> Result<String, String> {
     let mut proxy = state.proxy.lock().unwrap();
-    let result = proxy.stop().map_err(|e| e.to_string())?;
+    let result = proxy.stop();
     *state.started_at.lock().unwrap() = None;
     *state.prev_sample.lock().unwrap() = None;
     *state.is_running_cache.lock().unwrap() = false;
-    Ok(result)
+    drop(proxy);
+    // stop() is idempotent; map its Ok("Already stopped") to a clean message.
+    match result {
+        Ok(_) => Ok("Stopped".into()),
+        Err(e) => {
+            let friendly = {
+                let p = state.proxy.lock().unwrap();
+                p.classify_error(&e)
+            };
+            Err(friendly)
+        }
+    }
 }
 
 #[tauri::command]
@@ -184,6 +212,20 @@ fn stop_proxy(app: tauri::AppHandle, state: State<AppState>) -> Result<String, S
 #[tauri::command]
 fn get_status(state: State<AppState>) -> Result<bool, String> {
     Ok(state.proxy.lock().unwrap().is_running())
+}
+
+/// Return the authoritative lifecycle state so the UI can render transitional
+/// states (starting/stopping) accurately instead of guessing from a bool.
+#[tauri::command]
+fn get_vpn_state(state: State<AppState>) -> Result<String, String> {
+    use proxy::VpnState;
+    Ok(match state.proxy.lock().unwrap().state() {
+        VpnState::Stopped => "stopped",
+        VpnState::Starting => "starting",
+        VpnState::Running => "running",
+        VpnState::Stopping => "stopping",
+    }
+    .to_string())
 }
 
 #[tauri::command]
@@ -551,6 +593,14 @@ fn main() {
             is_running_cache: Mutex::new(false),
         })
         .setup(|app| {
+            // Give the proxy manager a handle so its monitor thread can emit
+            // state-change events to the frontend (e.g. unexpected exit).
+            {
+                let state: tauri::State<AppState> = app.state::<AppState>();
+                let proxy = state.proxy.lock().unwrap();
+                proxy.init_app_handle(app.handle().clone());
+            }
+
             let show_item = MenuItemBuilder::with_id("show", "Show").build(app)?;
             let hide_item = MenuItemBuilder::with_id("hide", "Hide").build(app)?;
             let quit_item = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
@@ -594,31 +644,18 @@ fn main() {
                         }
                         "connect" => {
                             let state = app.state::<AppState>();
-                            let mut proxy = state.proxy.lock().unwrap();
-                            if !proxy.is_running() {
-                                let _ = proxy.start();
-                                *state.started_at.lock().unwrap() = Some(Instant::now());
-                            }
-                            drop(proxy);
+                            let _ = start_proxy_inner(app, &state);
                             update_tray_state(app);
                         }
                         "disconnect" => {
                             let state = app.state::<AppState>();
-                            let mut proxy = state.proxy.lock().unwrap();
-                            if proxy.is_running() {
-                                let _ = proxy.stop();
-                                *state.started_at.lock().unwrap() = None;
-                            }
-                            drop(proxy);
+                            let _ = stop_proxy_inner(&state);
                             update_tray_state(app);
                         }
                         "quit" => {
                             let state = app.state::<AppState>();
-                            let mut proxy = state.proxy.lock().unwrap();
-                            if proxy.is_running() {
-                                let _ = proxy.stop();
-                            }
-                            drop(proxy);
+                            let _ = stop_proxy_inner(&state);
+                            update_tray_state(app);
                             app.exit(0);
                         }
                         _ => {}
@@ -658,6 +695,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             get_status,
+            get_vpn_state,
             start_proxy,
             stop_proxy,
             get_config,

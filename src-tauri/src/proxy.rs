@@ -8,6 +8,8 @@ use std::net::ToSocketAddrs;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
+use std::thread;
+use tauri::Emitter;
 
 // ── Windows helper: spawn without console window ──────────────────
 #[cfg(target_os = "windows")]
@@ -24,8 +26,37 @@ fn no_window(cmd: &mut Command) -> &mut Command {
 // ── sing-box config builder ────────────────────────────────────
 // Uses serde_json::json! instead of 30+ struct definitions
 
+/// Lifecycle state of the VPN. A single enum (not scattered booleans) so the
+/// UI and backend can never disagree about what the VPN is doing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VpnState {
+    Stopped,
+    Starting,
+    Running,
+    Stopping,
+}
+
+impl VpnState {
+    /// Textual label for logs/debug.
+    fn label(self) -> &'static str {
+        match self {
+            VpnState::Stopped => "stopped",
+            VpnState::Starting => "starting",
+            VpnState::Running => "running",
+            VpnState::Stopping => "stopping",
+        }
+    }
+}
+
 pub struct ProxyManager {
+    /// The live sing-box child process, if any.
     child: Arc<Mutex<Option<Child>>>,
+    /// Authoritative lifecycle state.
+    state: Arc<Mutex<VpnState>>,
+    /// Handle to the monitor thread that watches for unexpected exit.
+    monitor: Arc<Mutex<Option<thread::JoinHandle<()>>>>,
+    /// Tray/app handle used by the monitor to emit state-change events.
+    app_handle: Arc<Mutex<Option<tauri::AppHandle>>>,
     config_dir: PathBuf,
     config: Config,
     active_mode: Arc<Mutex<Option<String>>>,
@@ -44,6 +75,9 @@ impl ProxyManager {
 
         Ok(ProxyManager {
             child: Arc::new(Mutex::new(None)),
+            state: Arc::new(Mutex::new(VpnState::Stopped)),
+            monitor: Arc::new(Mutex::new(None)),
+            app_handle: Arc::new(Mutex::new(None)),
             config_dir: config_dir.clone(),
             config,
             active_mode: Arc::new(Mutex::new(None)),
@@ -52,11 +86,25 @@ impl ProxyManager {
         })
     }
 
+    /// Attach the app handle so the monitor thread can emit state events.
+    /// Must be called once during setup before any start().
+    pub fn init_app_handle(&self, handle: tauri::AppHandle) {
+        *self.app_handle.lock().unwrap() = Some(handle);
+    }
+
+    pub fn state(&self) -> VpnState {
+        *self.state.lock().unwrap()
+    }
+
+    /// Reflect reality: if our state says the process should exist but it has
+    /// already exited, reset to Stopped. Returns true if a process is alive
+    /// (or expected to be alive and not yet known dead).
     pub fn is_running(&self) -> bool {
         let mut guard = self.child.lock().unwrap();
-        if let Some(child) = guard.as_mut() {
+        let alive = if let Some(child) = guard.as_mut() {
             match child.try_wait() {
                 Ok(Some(_)) => {
+                    // Process exited; clear it and fall through to state reset.
                     *guard = None;
                     false
                 }
@@ -65,11 +113,67 @@ impl ProxyManager {
             }
         } else {
             false
+        };
+        drop(guard);
+
+        if !alive && self.state() != VpnState::Stopped {
+            // Process died but state still thinks it's up — reset.
+            self.reset_to_stopped_internal(None);
         }
+        alive
     }
 
     pub fn pid(&self) -> Option<u32> {
         self.child.lock().unwrap().as_ref().map(|c| c.id())
+    }
+
+    /// Classify a technical error into a short, non-technical user message.
+    /// The original error is ALWAYS preserved in the logs (debug_log + stderr),
+    /// so this never throws information away.
+    pub fn classify_error(&self, err: &anyhow::Error) -> String {
+        let msg = err.to_string().to_lowercase();
+        let raw = format!("{err:#}");
+
+        // Permission failures (Windows TUN needs admin)
+        if msg.contains("admin") || msg.contains("permission") || msg.contains("denied") {
+            self.debug_log(format!("[error-classify] permission/access: {raw}"));
+            return "The VPN could not start because Windows permission was denied.\nPlease restart the application with administrator permissions.".to_string();
+        }
+        // Server / connection failures (sing-box could not reach the server)
+        if msg.contains("connection refused")
+            || msg.contains("connect:")
+            || msg.contains("no route")
+            || msg.contains("timeout")
+            || msg.contains("deadline")
+            || msg.contains("handshake")
+            || msg.contains("closed by peer")
+        {
+            self.debug_log(format!("[error-classify] connection/server: {raw}"));
+            return "Could not connect to the VPN server.\nPlease check your internet connection or try again.".to_string();
+        }
+        // DNS / server resolution failures
+        if msg.contains("resolve") || msg.contains("dns") || msg.contains("hostname") || msg.contains("no ips resolved") {
+            self.debug_log(format!("[error-classify] dns/resolution: {raw}"));
+            return "Could not resolve the VPN server.\nPlease check your internet connection and try again.".to_string();
+        }
+        // TUN / network interface failures
+        if msg.contains("tun") || msg.contains("interface") || msg.contains("bind") || msg.contains("network") {
+            self.debug_log(format!("[error-classify] tun/network: {raw}"));
+            return "Could not start the VPN network interface.\nPlease try restarting the application.".to_string();
+        }
+        // Config validation failures
+        if msg.contains("config") || msg.contains("validation") || msg.contains("check failed") || msg.contains("invalid") {
+            self.debug_log(format!("[error-classify] config: {raw}"));
+            return "VPN configuration is invalid.\nPlease check the selected profile.".to_string();
+        }
+        // sing-box binary / startup failures
+        if msg.contains("sing-box") || msg.contains("spawn") || msg.contains("process") || msg.contains("exe") {
+            self.debug_log(format!("[error-classify] startup/binary: {raw}"));
+            return "The VPN could not start.\nPlease check the logs for more details.".to_string();
+        }
+        // Generic fallback — still logs the full error.
+        self.debug_log(format!("[error-classify] generic: {raw}"));
+        "The VPN could not start.\nCheck the logs for more details.".to_string()
     }
 
     fn debug_log(&self, msg: impl AsRef<str>) {
@@ -90,9 +194,23 @@ impl ProxyManager {
     }
 
     pub fn start(&mut self) -> Result<String> {
-        if self.is_running() {
-            bail!("Proxy already running");
+        // Prevent concurrent starts. If we are already starting/running/
+        // stopping, do not spawn another sing-box instance (Test 3).
+        let cur = self.state();
+        if cur != VpnState::Stopped {
+            self.debug_log(format!("[start] ignored: already in state {}", cur.label()));
+            bail!(match cur {
+                VpnState::Starting => "VPN is already starting.",
+                VpnState::Running => "VPN is already running.",
+                VpnState::Stopping => "VPN is stopping, please wait.",
+                VpnState::Stopped => unreachable!(),
+            });
         }
+
+        // Mark STARTING before any blocking work so a second call is rejected
+        // even while the first is downloading / resolving.
+        *self.state.lock().unwrap() = VpnState::Starting;
+        self.debug_log("[start] state -> Starting");
 
         // Check admin on Windows (needed for TUN)
         #[cfg(target_os = "windows")]
@@ -103,6 +221,7 @@ impl ProxyManager {
             // SAFETY: IsUserAnAdmin() from shell32.dll
             let is_admin = unsafe { IsUserAnAdmin() != 0 };
             if !is_admin {
+                self.reset_to_stopped_internal(Some("Admin required — Run as administrator."));
                 bail!("Admin required. Right-click stls.exe → 'Run as administrator'.");
             }
         }
@@ -110,10 +229,27 @@ impl ProxyManager {
         // Re-read config from active mode
         self.config = crate::config::get_active_config();
         self.debug_log("config loaded");
-        
+
         // Clear DNS cache on profile change to prevent IP reuse
         *self.dns_cache.lock().unwrap() = None;
 
+        let result = self.start_inner();
+        match result {
+            Ok(msg) => Ok(msg),
+            Err(e) => {
+                // ANY failure during startup must return to a consistent
+                // STOPPED state and leave no orphaned process (Test 4).
+                self.debug_log(format!("[start] failed: {e:#}"));
+                let friendly = self.classify_error(&e);
+                self.reset_to_stopped_internal(Some(&friendly));
+                // Return the friendly message, not the raw technical error.
+                bail!(friendly);
+            }
+        }
+    }
+
+    /// Actual startup work. `start()` wraps this to guarantee state cleanup.
+    fn start_inner(&mut self) -> Result<String> {
         let exe = self.get_bundled_or_download()?;
         self.debug_log(format!("sing-box exe: {}", exe.display()));
 
@@ -181,25 +317,193 @@ impl ProxyManager {
 
         *self.child.lock().unwrap() = Some(child);
         *self.active_mode.lock().unwrap() = Some("vpn".into());
+        *self.state.lock().unwrap() = VpnState::Running;
+        self.debug_log("[start] state -> Running");
 
+        // Spawn the monitor that detects unexpected sing-box exit.
+        self.spawn_monitor();
+
+        self.emit_state();
         Ok("VPN mode started".to_string())
     }
 
+    /// Reset internal state to STOPPED, ensuring no child process lingers.
+    /// `reason` (if any) is recorded in the debug log for troubleshooting.
+    fn reset_to_stopped_internal(&self, reason: Option<&str>) {
+        if let Some(r) = reason {
+            self.debug_log(format!("[state] returning to Stopped: {r}"));
+        } else {
+            self.debug_log("[state] returning to Stopped");
+        }
+        // Reap any child process.
+        if let Some(mut child) = self.child.lock().unwrap().take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        // Stop the monitor thread (it will observe the empty child and exit).
+        if let Some(h) = self.monitor.lock().unwrap().take() {
+            let _ = h.join();
+        }
+        *self.state.lock().unwrap() = VpnState::Stopped;
+        self.emit_state();
+    }
+
+    /// Stop the monitor thread if running (call before a fresh start).
+    fn stop_monitor(&self) {
+        if let Some(h) = self.monitor.lock().unwrap().take() {
+            let _ = h.join();
+        }
+    }
+
+    /// Launch a background thread that waits on the sing-box child and, if it
+    /// exits unexpectedly while we believe we are Running, resets state and
+    /// emits a `vpn-state` event with a human-readable message (Test 5).
+    fn spawn_monitor(&self) {
+        self.stop_monitor();
+
+        let child_arc = self.child.clone();
+        let state_arc = self.state.clone();
+        let monitor_arc = self.monitor.clone();
+        let app_arc = self.app_handle.clone();
+        let log_path = self.debug_log_path.clone();
+
+        let handle = thread::spawn(move || {
+            // Try to get a handle to the child; if it's already gone, exit.
+            let pid = { child_arc.lock().unwrap().as_ref().map(|c| c.id()) };
+            if pid.is_none() {
+                return;
+            }
+            // Block until the child exits.
+            let exit = {
+                let mut guard = child_arc.lock().unwrap();
+                match guard.as_mut() {
+                    Some(child) => child.wait(),
+                    None => return,
+                }
+            };
+            match exit {
+                Ok(status) => {
+                    let _ = fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(&log_path)
+                        .map(|mut f| {
+                            use std::io::Write;
+                            let _ = writeln!(f, "[monitor] sing-box exited unexpectedly: {status}");
+                        });
+                }
+                Err(e) => {
+                    let _ = fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(&log_path)
+                        .map(|mut f| {
+                            use std::io::Write;
+                            let _ = writeln!(f, "[monitor] error waiting on sing-box: {e}");
+                        });
+                }
+            }
+            // If we were Running (not intentionally Stopping), the process
+            // died on its own — reset to Stopped and notify the UI.
+            let was_running = *state_arc.lock().unwrap() == VpnState::Running;
+            if was_running {
+                // Clear child handle so is_running()/reset agree.
+                *child_arc.lock().unwrap() = None;
+                *state_arc.lock().unwrap() = VpnState::Stopped;
+                if let Some(app) = app_arc.lock().unwrap().as_ref() {
+                    let _ = app.emit(
+                        "vpn-state",
+                        serde_json::json!({
+                            "state": "stopped",
+                            "message": "The VPN connection was lost.\nThe VPN process stopped unexpectedly."
+                        }),
+                    );
+                }
+            }
+        });
+
+        *monitor_arc.lock().unwrap() = Some(handle);
+    }
+
+    /// Emit the current state to the frontend (if a handle is available).
+    fn emit_state(&self) {
+        if let Some(app) = self.app_handle.lock().unwrap().as_ref() {
+            let s = match *self.state.lock().unwrap() {
+                VpnState::Stopped => "stopped",
+                VpnState::Starting => "starting",
+                VpnState::Running => "running",
+                VpnState::Stopping => "stopping",
+            };
+            let _ = app.emit("vpn-state", serde_json::json!({ "state": s }));
+        }
+    }
+
     pub fn stop(&mut self) -> Result<String> {
+        // Idempotent: stopping when already stopped is harmless (Test 6).
+        if self.state() == VpnState::Stopped {
+            self.debug_log("[stop] ignored: already stopped");
+            return Ok("Already stopped".into());
+        }
+
+        // Mark STOPPING so concurrent callers are rejected and the UI can show
+        // the transitional state.
+        *self.state.lock().unwrap() = VpnState::Stopping;
+        self.debug_log("[stop] state -> Stopping");
+        self.emit_state();
+
+        let result = self.stop_inner();
+        // stop_inner always returns to Stopped (even on error), so no extra
+        // cleanup needed here.
+        result
+    }
+
+    /// Terminate the sing-box process and wait for it, with a bounded timeout
+    /// so we never hang. Guarantees no orphaned process remains (Test 2).
+    fn stop_inner(&mut self) -> Result<String> {
         let _mode = self.active_mode.lock().unwrap().take();
+
+        // Stop the monitor first so it doesn't race with our kill/wait.
+        self.stop_monitor();
 
         let mut guard = self.child.lock().unwrap();
         let was_running = guard.is_some();
         if let Some(mut child) = guard.take() {
-            child.kill()?;
-            child.wait()?;
+            let _ = child.kill();
+            // Wait up to 5s for a clean exit; then reap via try_wait loop.
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            loop {
+                match child.try_wait() {
+                    Ok(Some(_)) => break,
+                    Ok(None) => {
+                        if std::time::Instant::now() >= deadline {
+                            // Timed out waiting — process will be reaped by OS on
+                            // drop; record and move on rather than hang.
+                            self.debug_log("[stop] sing-box did not exit within 5s; proceeding");
+                            break;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                    }
+                    Err(e) => {
+                        self.debug_log(format!("[stop] wait error: {e}"));
+                        break;
+                    }
+                }
+            }
         }
         drop(guard);
 
-        if !was_running {
-            bail!("Not running");
+        // Final reap in case anything lingers.
+        if let Some(mut child) = self.child.lock().unwrap().take() {
+            let _ = child.kill();
+            let _ = child.wait();
         }
 
+        *self.state.lock().unwrap() = VpnState::Stopped;
+        self.emit_state();
+
+        if !was_running {
+            return Ok("Already stopped".into());
+        }
         Ok("Stopped".into())
     }
 

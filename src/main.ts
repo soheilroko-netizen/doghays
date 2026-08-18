@@ -165,6 +165,17 @@ function clearMessage() {
   message.className = 'message';
 }
 
+// ── Backend state-change events ──────────────────────────────
+// The Rust monitor emits "vpn-state" when the VPN transitions (e.g. the
+// sing-box process exits unexpectedly). Show any message and refresh status.
+listen<{ state: string; message?: string }>('vpn-state', (event) => {
+  const payload = event.payload;
+  if (payload.message) {
+    showMessage(payload.message, true);
+  }
+  updateStatus();
+}).catch((e) => console.error('failed to listen vpn-state', e));
+
 // ── Views ────────────────────────────────────────────────────
 function showView(view: 'main' | 'log') {
   mainView.style.display = view === 'main' ? 'block' : 'none';
@@ -692,12 +703,16 @@ btnStart.addEventListener('click', async () => {
     startPingLoop();
     lastPid = null;
   } catch (e: any) {
+    // e is already a classified, non-technical message from the backend.
     showMessage(String(e), true);
   }
+  // Reflect authoritative state (handles immediate failure -> Stopped).
+  updateStatus();
 });
 
 btnStop.addEventListener('click', async () => {
   clearMessage();
+  showMessage('Stopping...', false);
   try {
     await invoke('stop_proxy');
     showMessage('Stopped');
@@ -707,6 +722,7 @@ btnStop.addEventListener('click', async () => {
   } catch (e: any) {
     showMessage(String(e), true);
   }
+  updateStatus();
 });
 
 btnLog.addEventListener('click', () => showView('log'));
