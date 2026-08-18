@@ -492,60 +492,18 @@ fn update_settings(
         }
     }
     
-    // Reconnect if proxy is running and requested.
-    // A successful `start` only means the process launched — on Windows the TUN
-    // adapter often needs longer to come up, and the tunnel can report "running"
-    // while still passing NO traffic. So after start we VERIFY traffic actually
-    // flows (probe the ping target). If it doesn't, we surface the failure
-    // instead of leaving a silently dead tunnel that leaks the real IP.
-    let restarted = if reconnect {
+    // On a settings/profile change while the tunnel is running, we STOP the
+    // tunnel cleanly and disarm the watchdog. We do NOT auto-restart here:
+    // the stop->start TUN rebind on Windows is racy and leaves a "running but
+    // dead" tunnel (pings die -> watchdog trips -> real IP leaks). A fresh
+    // Connect press does a clean, reliable start. The UI re-arms the watchdog
+    // on the next successful Connect.
+    let stopped = if reconnect {
         let was_running = state.proxy.lock().unwrap().is_running();
         if was_running {
             let _ = stop_proxy_inner(&state);
-            // Settle so the TUN adapter / previous process fully release.
-            std::thread::sleep(std::time::Duration::from_millis(1200));
-            let mut start_ok = false;
-            for attempt in 0..3 {
-                match start_proxy_inner(&app, &state) {
-                    Ok(_) => { start_ok = true; break; }
-                    Err(e) => {
-                        if attempt < 2 {
-                            std::thread::sleep(std::time::Duration::from_millis(1000));
-                        } else {
-                            // Propagate the start failure so the UI shows it.
-                            update_tray_state(&app);
-                            return Err(format!("Reconnect failed to start: {}", e));
-                        }
-                    }
-                }
-            }
-            if start_ok {
-                // Verify the tunnel actually carries traffic before declaring success.
-                let mut traffic_ok = false;
-                for _ in 0..5 {
-                    std::thread::sleep(std::time::Duration::from_millis(600));
-                    let r = state
-                        .http_client
-                        .get(PING_TARGET)
-                        .timeout(std::time::Duration::from_secs(2))
-                        .send();
-                    if let Ok(resp) = r {
-                        if resp.status().is_success() || resp.status().as_u16() == 204 {
-                            traffic_ok = true;
-                            break;
-                        }
-                    }
-                }
-                update_tray_state(&app);
-                if !traffic_ok {
-                    // Tunnel launched but no traffic — tear it down and report.
-                    let _ = stop_proxy_inner(&state);
-                    return Err("Reconnect failed: tunnel started but no traffic flowed (TUN adapter did not come up).".into());
-                }
-                true
-            } else {
-                false
-            }
+            update_tray_state(&app);
+            true
         } else {
             false
         }
@@ -553,7 +511,7 @@ fn update_settings(
         false
     };
     
-    Ok(restarted)
+    Ok(stopped)
 }
 
 #[tauri::command]
@@ -582,13 +540,13 @@ fn set_profile(app: tauri::AppHandle, state: State<AppState>, profile: String) -
     // Save profile
     config::save_profile(&profile).map_err(|e| e.to_string())?;
     
-    // Restart proxy if running
+    // On a profile change while running, STOP cleanly (do NOT auto-restart — the
+    // stop->start TUN rebind is racy). The user presses Connect for a fresh,
+    // reliable start. The UI disarms the watchdog on profile change.
     let running = state.proxy.lock().unwrap().is_running();
     if running {
-        stop_proxy_inner(&state)?;
-        start_proxy_inner(&app, &state)?;
+        let _ = stop_proxy_inner(&state);
     }
-    
     update_tray_state(&app);
     Ok(())
 }

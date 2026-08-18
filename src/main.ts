@@ -413,6 +413,14 @@ function stopPingLoop() {
   watchTimer = null;
 }
 
+// Disarm the auto-disconnect watchdog without fully stopping the ping loop:
+// used when settings/profile changes deliberately stop the tunnel, so the 10s
+// timer can't fire the scary "no longer protected" banner mid-transition.
+function disarmWatchdog() {
+  watchdogTripped = false;
+  lastGoodPingTs = 0;
+}
+
 // ── Status update (every 2s) ─────────────────────────────────
 let lastPid: number | null = null;
 let uptimeStartSecs: number | null = null;
@@ -747,8 +755,8 @@ splitPresetCards.forEach(card => {
       });
       showMessage('Settings saved', false);
       if (running) {
-        lastGoodPingTs = 0; // reset watchdog clock for the reconnect transition
-        showMessage('Reconnected with new split settings', false);
+        disarmWatchdog(); // tunnel stopped cleanly; don't trip watchdog
+        showMessage('Settings saved — press Connect to apply & restart', false);
       }
     } catch (e) {
       showMessage(`Failed: ${e}`, true);
@@ -781,7 +789,7 @@ btnSaveSettings.addEventListener('click', async () => {
     if (splitMode === 'wow' && !validateWowSelection()) return;
     await invoke('update_settings', { mtu, splitMode, tunStack: settingTunStack.value, wowApps: splitMode === 'wow' ? getWowApps() : null, wowDomains: splitMode === 'wow' ? getWowDomains() : null, reconnect: running });
     showMessage('Settings saved', false);
-    if (running) { lastGoodPingTs = 0; showMessage('Reconnected', false); } // reset watchdog clock
+    if (running) { disarmWatchdog(); showMessage('Settings saved — press Connect to restart', false); } // stopped cleanly; re-arm on Connect
   } catch (e) {
     showMessage(`Failed: ${e}`, true);
   }
@@ -880,7 +888,9 @@ protocolTabs.forEach(tab => {
       await invoke('set_profile', { profile: getProfileName() });
       if (protocol === 'h2') loadH2PresetSelection();
       await updateStatus();
-      showMessage('Protocol changed', false);
+      const isRunning = await invoke<boolean>('get_status');
+      if (isRunning) { disarmWatchdog(); showMessage('Protocol changed — press Connect to restart', false); }
+      else showMessage('Protocol changed', false);
     } catch (e) {
       showMessage(`Failed: ${e}`, true);
     }
