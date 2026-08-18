@@ -8,6 +8,7 @@ use std::io::{Read, Write};
 use std::net::ToSocketAddrs;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use tauri::Emitter;
@@ -56,6 +57,10 @@ pub struct ProxyManager {
     state: Arc<Mutex<VpnState>>,
     /// Handle to the monitor thread that watches for unexpected exit.
     monitor: Arc<Mutex<Option<thread::JoinHandle<()>>>>,
+    /// Epoch token for the active monitor. Each spawn bumps it so a stale
+    /// monitor (from a previous start) detects it has been superseded and
+    /// exits promptly without touching current state.
+    monitor_epoch: Arc<AtomicU64>,
     /// Tray/app handle used by the monitor to emit state-change events.
     app_handle: Arc<Mutex<Option<tauri::AppHandle>>>,
     /// Windows Job Object (kill-on-close). When dropped, the OS kills sing-box.
@@ -80,6 +85,7 @@ impl ProxyManager {
             child: Arc::new(Mutex::new(None)),
             state: Arc::new(Mutex::new(VpnState::Stopped)),
             monitor: Arc::new(Mutex::new(None)),
+            monitor_epoch: Arc::new(AtomicU64::new(0)),
             app_handle: Arc::new(Mutex::new(None)),
             job: Arc::new(Mutex::new(None)),
             config_dir: config_dir.clone(),
@@ -362,42 +368,56 @@ impl ProxyManager {
         // Dropping the WinJob closes the job handle; with KillOnJobClose any
         // still-living assigned process (sing-box) is terminated by the OS.
         *self.job.lock().unwrap() = None;
-        // Stop the monitor thread (it will observe the empty child and exit).
-        if let Some(h) = self.monitor.lock().unwrap().take() {
-            let _ = h.join();
-        }
+        // Tell the monitor (if any) to retire cooperatively via the epoch
+        // counter; it exits on its next poll. We do NOT join it — that would
+        // block this command off the main thread.
+        self.monitor_epoch.fetch_add(1, Ordering::SeqCst);
+        *self.monitor.lock().unwrap() = None;
         *self.state.lock().unwrap() = VpnState::Stopped;
         self.emit_state();
     }
 
-    /// Stop the monitor thread if running (call before a fresh start).
+    /// Retire any running monitor WITHOUT blocking the caller. Used before a
+    /// fresh start. The previous monitor detects its epoch is stale (or the
+    /// empty child) and exits on its own; we never join it.
     fn stop_monitor(&self) {
-        if let Some(h) = self.monitor.lock().unwrap().take() {
-            let _ = h.join();
-        }
+        self.monitor_epoch.fetch_add(1, Ordering::SeqCst);
+        *self.monitor.lock().unwrap() = None;
     }
 
     /// Launch a background thread that watches the sing-box child and, if it
     /// exits unexpectedly while we believe we are Running, resets state and
     /// emits a `vpn-state` event with a human-readable message (Test 5).
     ///
-    /// CRITICAL: the monitor must NOT hold `self.child` while waiting for the
-    /// process — the main thread polls `is_running()` (via the frontend status
-    /// timer) and would block on the same mutex, freezing the UI. So we poll
-    /// `try_wait()` in short intervals and release the lock between polls.
+    /// CRITICAL lifecycle rules (Batch 2 fix):
+    ///  - The monitor does NOT hold `self.child` during a wait. It polls
+    ///    `try_wait()` every 400ms and releases the lock between polls, so the
+    ///    main-thread status poll (frontend timer) never blocks → no UI freeze.
+    ///  - Shutdown is cooperative via an epoch token, NOT a join: `stop()`/
+    ///    `reset()` bump `monitor_epoch` and drop the handle; this monitor
+    ///    detects the mismatch (or the now-empty child) and returns. No Tauri
+    ///    command ever waits on this thread.
     fn spawn_monitor(&self) {
         self.stop_monitor();
+        let my_epoch = self.monitor_epoch.fetch_add(1, Ordering::SeqCst) + 1;
 
         let child_arc = self.child.clone();
         let state_arc = self.state.clone();
-        let monitor_arc = self.monitor.clone();
+        let epoch_arc = self.monitor_epoch.clone();
         let app_arc = self.app_handle.clone();
         let log_path = self.debug_log_path.clone();
 
         let handle = thread::spawn(move || {
             // Poll briefly; never hold the shared child lock during a long wait.
             loop {
+                // Cooperative shutdown: retire if superseded or cancelled.
+                if epoch_arc.load(Ordering::SeqCst) != my_epoch {
+                    return;
+                }
                 std::thread::sleep(std::time::Duration::from_millis(400));
+                if epoch_arc.load(Ordering::SeqCst) != my_epoch {
+                    return;
+                }
 
                 // Acquire the lock only long enough to ask the child's status.
                 let exited: Option<std::process::ExitStatus> = {
@@ -420,7 +440,7 @@ impl ProxyManager {
                         },
                         None => {
                             // Child was taken over by stop()/reset — nothing to watch.
-                            break;
+                            return;
                         }
                     }
                 };
@@ -437,10 +457,11 @@ impl ProxyManager {
                                 use std::io::Write;
                                 let _ = writeln!(f, "[monitor] sing-box exited unexpectedly: {status}");
                             });
-                        // If we were Running (not intentionally Stopping), the
-                        // process died on its own — reset and notify the UI.
-                        let was_running = *state_arc.lock().unwrap() == VpnState::Running;
-                        if was_running {
+                        // Only react if we are still the live monitor AND we were
+                        // Running (not intentionally Stopping). Reset + notify UI.
+                        let live = epoch_arc.load(Ordering::SeqCst) == my_epoch
+                            && *state_arc.lock().unwrap() == VpnState::Running;
+                        if live {
                             *state_arc.lock().unwrap() = VpnState::Stopped;
                             if let Some(app) = app_arc.lock().unwrap().as_ref() {
                                 let _ = app.emit(
@@ -452,14 +473,14 @@ impl ProxyManager {
                                 );
                             }
                         }
-                        break;
+                        return;
                     }
                     None => { /* still running — keep polling */ }
                 }
             }
         });
 
-        *monitor_arc.lock().unwrap() = Some(handle);
+        *self.monitor.lock().unwrap() = Some(handle);
     }
 
     /// Emit the current state to the frontend (if a handle is available).
