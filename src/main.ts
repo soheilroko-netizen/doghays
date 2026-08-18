@@ -389,7 +389,7 @@ async function watchdogCheck() {
   if (Date.now() - lastGoodPingTs > NO_PING_DISCONNECT_MS) {
     watchdogTripped = true;
     try { await invoke('stop_proxy'); } catch { /* ignore */ }
-    showMessage('VPN auto-disconnected: no ping for 20s — you are no longer protected.', true);
+    showMessage('VPN auto-disconnected: no ping for 10s — you are no longer protected.', true);
   }
 }
 
@@ -444,7 +444,7 @@ let hasPingResponse = false;
 // Auto-disconnect watchdog: armed only after we've seen at least one good ping.
 // If the link then goes silent (no successful ping) for this long, tear the
 // tunnel down so the UI never hangs waiting on a dead/stalled connection.
-const NO_PING_DISCONNECT_MS = 20000;
+const NO_PING_DISCONNECT_MS = 10000;
 let lastGoodPingTs = 0;   // timestamp of last successful ping (0 = not yet connected)
 let watchdogTripped = false;
 let watchTimer: ReturnType<typeof setInterval> | null = null;
@@ -747,6 +747,7 @@ splitPresetCards.forEach(card => {
       });
       showMessage('Settings saved', false);
       if (running) {
+        lastGoodPingTs = 0; // reset watchdog clock for the reconnect transition
         showMessage('Reconnected with new split settings', false);
       }
     } catch (e) {
@@ -780,7 +781,7 @@ btnSaveSettings.addEventListener('click', async () => {
     if (splitMode === 'wow' && !validateWowSelection()) return;
     await invoke('update_settings', { mtu, splitMode, tunStack: settingTunStack.value, wowApps: splitMode === 'wow' ? getWowApps() : null, wowDomains: splitMode === 'wow' ? getWowDomains() : null, reconnect: running });
     showMessage('Settings saved', false);
-    if (running) showMessage('Reconnected', false);
+    if (running) { lastGoodPingTs = 0; showMessage('Reconnected', false); } // reset watchdog clock
   } catch (e) {
     showMessage(`Failed: ${e}`, true);
   }
