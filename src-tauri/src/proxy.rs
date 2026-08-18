@@ -24,11 +24,6 @@ fn no_window(cmd: &mut Command) -> &mut Command {
 // ── sing-box config builder ────────────────────────────────────
 // Uses serde_json::json! instead of 30+ struct definitions
 
-/// Fallback bypass range when the server hostname cannot be resolved
-const TUN_FALLBACK_CIDR: &str = "198.18.0.0/15";
-/// Static placeholder IP used when no server IP was resolved
-const TUN_FALLBACK_IP: &str = "198.18.0.0";
-
 pub struct ProxyManager {
     child: Arc<Mutex<Option<Child>>>,
     config_dir: PathBuf,
@@ -213,28 +208,30 @@ impl ProxyManager {
     fn build_vpn_config(&self) -> Result<serde_json::Value> {
         let c = &self.config;
 
-        // Resolve STLS server IP to bypass from TUN (cached)
+        // Resolve the VPN server hostname to build the TUN bypass rules.
+        // The hostname stays the AUTHORITATIVE sing-box outbound address; the
+        // resolved IP is used ONLY to route around the local TUN interface.
+        // If resolution fails we must NOT substitute a placeholder IP as the
+        // server address — fail cleanly instead (see below).
         let stls_ips: Vec<String> = {
             let mut cache = self.dns_cache.lock().unwrap();
             if let Some(ips) = cache.as_ref() {
                 ips.clone()
             } else {
-                let ips = resolve_hostname(&c.server_address).unwrap_or_else(|_| {
-                    eprintln!("[stls] DNS resolution failed for {} — using hostname directly", c.server_address);
-                    vec![]
-                });
+                let ips = resolve_hostname(&c.server_address)
+                    .context("VPN server hostname could not be resolved before startup")?;
                 *cache = Some(ips.clone());
                 ips
             }
         };
 
-        let bypass_cidrs: Vec<String> = if stls_ips.is_empty() {
-            vec![TUN_FALLBACK_CIDR.into()]
-        } else {
-            stls_ips.iter().map(|ip| format!("{ip}/32")).collect()
-        };
+        let bypass_cidrs: Vec<String> =
+            stls_ips.iter().map(|ip| format!("{ip}/32")).collect();
 
-        let stls_ip = stls_ips.first().cloned().unwrap_or_else(|| TUN_FALLBACK_IP.into());
+        // If no IPs resolved (resolve_hostname already errors above, so this
+        // is only defensive), keep the hostname authoritative — do not fall
+        // back to a reserved placeholder as the real server address.
+        let stls_ip = stls_ips.first().cloned().unwrap_or_else(|| c.server_address.clone());
         let h2_mode = c.mode == "hysteria2";
         let final_outbound = if h2_mode { "h2-out" } else { "ss-out" };
 
@@ -495,7 +492,7 @@ fn resolve_hostname(host: &str) -> Result<Vec<String>> {
     let addr_str = format!("{host}:0");
     let addrs = addr_str
         .to_socket_addrs()
-        .context("DNS resolution failed")?;
+        .context("bootstrap DNS resolution failed (using the physical network, before the VPN tunnel exists)")?;
     let mut ips: Vec<String> = Vec::new();
     for addr in addrs {
         let ip = addr.ip().to_string();
@@ -506,7 +503,7 @@ fn resolve_hostname(host: &str) -> Result<Vec<String>> {
     if ips.is_empty() {
         bail!("no IPs resolved for {host}");
     }
-    println!("[stls] resolved {host} -> {:?}", ips);
+    println!("[stls] bootstrap resolved {host} -> {ips:?} (used for TUN bypass only; outbound keeps hostname {host})");
     Ok(ips)
 }
 
