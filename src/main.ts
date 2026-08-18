@@ -4,7 +4,7 @@ import { getCurrentWindow, LogicalSize } from '@tauri-apps/api/window';
 import './styles.css';
 
 // ── Constants ────────────────────────────────────────────────
-const PING_INTERVAL_MS = 5000;
+const PING_INTERVAL_MS = 3000;
 const STATUS_INTERVAL_MS = 2000;
 const UPTIME_INTERVAL_MS = 1000;
 /** Ping bars / triangle turn red at or above this latency */
@@ -100,7 +100,12 @@ const message = document.getElementById('message')!;
 // Inline log elements
 const logSection = document.getElementById('log-section')!;
 const logToggle = document.getElementById('log-toggle')!;
-const inlineLogContent = document.getElementById('inline-log-content')!;
+const pingChartWrap = document.getElementById('ping-chart-wrap')!;
+const pingHistCanvas = document.getElementById('ping-hist-canvas') as HTMLCanvasElement;
+const pingStatAvg = document.getElementById('ping-stat-avg')!;
+const pingStatJit = document.getElementById('ping-stat-jit')!;
+const pingStatMin = document.getElementById('ping-stat-min')!;
+const pingStatMax = document.getElementById('ping-stat-max')!;
 
 // Settings panel
 const settingsPanel = document.getElementById('settings-panel')!;
@@ -234,11 +239,82 @@ const LOSS_SAMPLES = 30;
 const LOSS_TIMEOUT_MS = 1000; // latency above this counts as loss (gaming: 1s is an eternity)
 const lossRing: boolean[] = []; // true = lost
 
+// Ping history ring buffer (for the chart in the expandable "Ping" panel).
+// Sample timestamp is implicit: PING_INTERVAL_MS apart. Keep last 60 samples.
+const PING_HISTORY = 60;
+const pingHistory: number[] = []; // ms per sample, -1 = no/lost response
+
+function drawPingChart() {
+  const ctx = pingHistCanvas.getContext('2d');
+  if (!ctx) return;
+  const W = pingHistCanvas.width, H = pingHistCanvas.height, pad = 4;
+  ctx.clearRect(0, 0, W, H);
+
+  // Baseline gridlines at 100/200ms (inferred range if data present)
+  let max = 0, min = 0;
+  for (const v of pingHistory) { if (v > 0) { if (v > max) max = v; if (min === 0 || v < min) min = v; } }
+  if (max === 0) max = 300; // nothing yet — show full 0..300 scale
+  if (min > max) min = 0;
+  const range = (max - min) || 1;
+  const yOf = (v: number) => H - pad - ((Math.min(v, max) - min) / range) * (H - 2 * pad);
+
+  ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+  ctx.lineWidth = 1;
+  for (const g of [100, 200, 300]) {
+    if (g >= min && g <= max) {
+      const y = yOf(g);
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+    }
+  }
+
+  const n = pingHistory.length;
+  if (n < 2) return;
+  ctx.lineWidth = 1.6;
+  for (let i = 1; i < n; i++) {
+    const x0 = ((i - 1) / (PING_HISTORY - 1)) * W;
+    const x1 = (i / (PING_HISTORY - 1)) * W;
+    const v0 = pingHistory[i - 1], v1 = pingHistory[i];
+    const y0 = v0 > 0 ? yOf(v0) : H - pad;
+    const y1 = v1 > 0 ? yOf(v1) : H - pad;
+    const v = v1 > 0 ? v1 : v0;
+    ctx.strokeStyle = v > 300 ? '#ff3366' : v > 200 ? '#ff6b35' : v > 145 ? '#ffcc00' : '#00ff88';
+    ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+  }
+
+  // current point dot
+  const last = pingHistory[n - 1];
+  if (last > 0) {
+    const lx = ((n - 1) / (PING_HISTORY - 1)) * W;
+    const ly = yOf(last);
+    ctx.fillStyle = '#00ff88';
+    ctx.beginPath(); ctx.arc(lx, ly, 2.5, 0, Math.PI * 2); ctx.fill();
+  }
+}
+
+function updatePingStats() {
+  const valid = pingHistory.filter(v => v > 0);
+  if (!valid.length) {
+    pingStatAvg.textContent = '–ms'; pingStatJit.textContent = '±–ms';
+    pingStatMin.textContent = '–ms'; pingStatMax.textContent = '–ms';
+    return;
+  }
+  const sum = valid.reduce((a, b) => a + b, 0);
+  const avg = Math.round(sum / valid.length);
+  const mn = Math.min(...valid), mx = Math.max(...valid);
+  // jitter ~= mean absolute deviation from the average (simple, stable)
+  const jit = Math.round(valid.reduce((a, b) => a + Math.abs(b - avg), 0) / valid.length);
+  pingStatAvg.textContent = `${avg}ms`;
+  pingStatJit.textContent = `±${jit}ms`;
+  pingStatMin.textContent = `${mn}ms`;
+  pingStatMax.textContent = `${mx}ms`;
+}
+
 async function sampleLoss() {
   let lost = false;
+  let ms: number | null = null;
   try {
     const result = await invoke<string>('real_ping');
-    const ms = parseInt(result.replace('ms', ''));
+    ms = parseInt(result.replace('ms', ''));
     if (isNaN(ms) || ms > LOSS_TIMEOUT_MS) lost = true;
   } catch {
     lost = true;
@@ -248,6 +324,10 @@ async function sampleLoss() {
   const lostCount = lossRing.filter(Boolean).length;
   const pct = Math.round((lostCount / lossRing.length) * 100);
   lossValue.textContent = `${pct}%`;
+
+  pingHistory.push(ms ?? -1);
+  if (pingHistory.length > PING_HISTORY) pingHistory.shift();
+  if (logSection.classList.contains('expanded')) { drawPingChart(); updatePingStats(); }
 }
 
 async function doPing() {
@@ -680,13 +760,7 @@ btnDoh.addEventListener('click', async () => {
 
 // ── Events ───────────────────────────────────────────────────
 listen('proxy-log', (event: { payload: string }) => {
-  // Update inline log if expanded
-  if (logSection.classList.contains('expanded')) {
-    inlineLogContent.textContent += `\n${event.payload}`;
-    inlineLogContent.scrollTop = inlineLogContent.scrollHeight;
-  }
-  
-  // Update separate log view if visible
+  // Separate full log view only (inline panel now shows the ping chart).
   if (logView.style.display !== 'none') {
     logContent.textContent += `\n${event.payload}`;
     logContent.scrollTop = logContent.scrollHeight;
@@ -725,7 +799,11 @@ btnStop.addEventListener('click', async () => {
   updateStatus();
 });
 
-btnLog.addEventListener('click', () => showView('log'));
+// Header "Ping" button now toggles the expandable ping-chart panel (was the inline log).
+btnLog.addEventListener('click', () => {
+  const isExpanded = logSection.classList.toggle('expanded');
+  if (isExpanded) { drawPingChart(); updatePingStats(); }
+});
 btnBackFromLog.addEventListener('click', () => showView('main'));
 btnRefreshLog.addEventListener('click', refreshLog);
 

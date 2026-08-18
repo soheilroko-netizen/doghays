@@ -39,7 +39,7 @@
               </div>
             </div>
             <button id="btn-settings-toggle" class="btn-small">Settings</button>
-            <button id="btn-main-log" class="btn-small">Log</button>
+            <button id="btn-main-log" class="btn-small">Ping</button>
             <button id="btn-doh" class="btn-small" title="Set DNS to private DoH servers">DoH DNS</button>
           </div>
 
@@ -180,15 +180,23 @@
 
         <div id="message" class="message"></div>
 
-        <!-- Inline Log Panel -->
+        <!-- Ping Chart Panel (replaces inline log) -->
         <div class="log-section" id="log-section">
           <button class="log-toggle" id="log-toggle">
-            <span>Show Logs</span>
+            <span>Show Ping</span>
             <svg class="chevron" viewBox="0 0 24 24" width="16" height="16">
               <path d="M7 10l5 5 5-5" stroke="currentColor" stroke-width="2" fill="none"/>
             </svg>
           </button>
-          <pre class="log-content" id="inline-log-content"></pre>
+          <div class="log-content ping-chart" id="ping-chart-wrap">
+            <canvas id="ping-hist-canvas" width="288" height="80"></canvas>
+            <div class="ping-stats">
+              <span>avg <b id="ping-stat-avg">–ms</b></span>
+              <span>jitter <b id="ping-stat-jit">±–ms</b></span>
+              <span>min <b id="ping-stat-min">–ms</b></span>
+              <span>max <b id="ping-stat-max">–ms</b></span>
+            </div>
+          </div>
         </div>
       </div>
 

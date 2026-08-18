@@ -455,6 +455,42 @@
   padding: var(--spacing-md);
 }
 
+/* ── Ping Chart (replaces inline log body) ─────────────────── */
+.ping-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: #0a0a0a;
+}
+
+.ping-chart #ping-hist-canvas {
+  width: 100%;
+  height: 80px;
+  display: block;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.ping-stats {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  flex-wrap: wrap;
+}
+
+.ping-stats b {
+  font-family: 'Courier New', monospace;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.ping-stats span:first-child b { color: var(--ping-green); }
+.ping-stats span:nth-child(2) b { color: var(--accent-h2); }
+.ping-stats span:nth-child(3) b { color: var(--ping-yellow); }
+.ping-stats span:nth-child(4) b { color: var(--ping-red); }
+
 /* ── Mode Toggle (Legacy) ────────────────────────────────── */
 
 .mode-toggle {
