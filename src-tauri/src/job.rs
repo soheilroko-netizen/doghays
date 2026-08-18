@@ -78,10 +78,6 @@ mod imp {
             }
             Ok(())
         }
-
-        pub fn assigned(&self) -> bool {
-            self.assigned
-        }
     }
 
     impl Drop for WinJob {
