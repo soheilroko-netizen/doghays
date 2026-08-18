@@ -629,10 +629,13 @@ impl ProxyManager {
         // App-rule flag (set by WoW block below)
         let mut has_app_rules = false;
 
-        // For WoW mode, add hardcoded WoW domains (always tunnel) + user-checked apps
+        // For WoW mode, optionally add hardcoded WoW domains + user-checked apps.
+        // "WoW Domains" is now a user toggle (c.wow_domains) — off means only the
+        // checked apps are tunneled. Apps remain optional too; caller enforces ≥1.
         if is_wow_mode {
             let arr = route_rules.as_array_mut().unwrap();
-            let wow_domains = [
+            if c.wow_domains {
+                let wow_domains = [
                 "battle.net",
                 "blizzard.com",
                 "worldofwarcraft.com",
@@ -661,6 +664,7 @@ impl ProxyManager {
             for domain in wow_domains {
                 arr.insert(3, serde_json::json!({"domain_suffix": [domain], "outbound": default_direct}));
             }
+            } // end if c.wow_domains
             // Apps to tunnel, keyed by user-checkbox id
             let app_map: &[(&str, &[&str])] = &[
                 ("discord", &["Discord.exe", "Update.exe"]),

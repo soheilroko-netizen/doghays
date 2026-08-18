@@ -434,7 +434,16 @@ fn get_h2_speeds() -> Result<serde_json::Value, String> {
 }
 
 #[tauri::command]
-fn update_settings(mtu: Option<u32>, split_mode: String, reconnect: bool, wow_apps: Option<Vec<String>>, tun_stack: Option<String>, state: State<AppState>, app: tauri::AppHandle) -> Result<bool, String> {
+fn update_settings(
+    mtu: Option<u32>,
+    split_mode: String,
+    reconnect: bool,
+    wow_apps: Option<Vec<String>>,
+    wow_domains: Option<bool>,
+    tun_stack: Option<String>,
+    state: State<AppState>,
+    app: tauri::AppHandle,
+) -> Result<bool, String> {
     // Validate MTU
     if let Some(m) = mtu {
         if m < 576 || m > 9000 {
@@ -467,7 +476,20 @@ fn update_settings(mtu: Option<u32>, split_mode: String, reconnect: bool, wow_ap
         let apps = wow_apps.unwrap_or_else(|| {
             vec!["discord".to_string(), "chrome".to_string(), "telegram".to_string()]
         });
+        let use_domains = wow_domains.unwrap_or(true);
+        // At least one of: WoW domains, Discord, Chrome, or Telegram must be selected.
+        if !use_domains && apps.is_empty() {
+            return Err(
+                "Select at least one option: WoW Domains, Discord, Chrome, or Telegram".into(),
+            );
+        }
         config::save_wow_apps(&apps).map_err(|e| e.to_string())?;
+        config::save_wow_domains(use_domains).map_err(|e| e.to_string())?;
+    } else {
+        // Keep persisted values in sync even when leaving wow mode.
+        if let Some(d) = wow_domains {
+            config::save_wow_domains(d).map_err(|e| e.to_string())?;
+        }
     }
     
     // Reconnect if proxy is running and requested
@@ -492,9 +514,11 @@ fn update_settings(mtu: Option<u32>, split_mode: String, reconnect: bool, wow_ap
 fn get_split_settings() -> Result<serde_json::Value, String> {
     let split_mode = config::load_split_mode();
     let wow_apps = config::load_wow_apps();
+    let wow_domains = config::load_wow_domains();
     Ok(serde_json::json!({
         "split_mode": split_mode,
-        "wow_apps": wow_apps
+        "wow_apps": wow_apps,
+        "wow_domains": wow_domains
     }))
 }
 

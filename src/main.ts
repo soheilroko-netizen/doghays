@@ -119,9 +119,11 @@ const btnBackFromLog = document.getElementById('btn-back-from-log')!;
 
 // Settings inputs
 const wowInfoContainer = document.getElementById('wow-info-container')!;
+const wowDomains = document.getElementById('wow-domains') as HTMLInputElement;
 const wowAppDiscord = document.getElementById('wow-app-discord') as HTMLInputElement;
 const wowAppChrome = document.getElementById('wow-app-chrome') as HTMLInputElement;
 const wowAppTelegram = document.getElementById('wow-app-telegram') as HTMLInputElement;
+const wowSelectionError = document.getElementById('wow-selection-error')!;
 const settingMtu = document.getElementById('setting-mtu') as HTMLInputElement;
 const settingTunStack = document.getElementById('setting-tun-stack') as HTMLSelectElement;
 const btnSaveSettings = document.getElementById('btn-save-settings')!;
@@ -240,9 +242,10 @@ const LOSS_TIMEOUT_MS = 1000; // latency above this counts as loss (gaming: 1s i
 const lossRing: boolean[] = []; // true = lost
 
 // Ping history ring buffer (for the chart in the expandable "Ping" panel).
-// Sample timestamp is implicit: PING_INTERVAL_MS apart. Keep last 60 samples.
-const PING_HISTORY = 60;
-const pingHistory: number[] = []; // ms per sample, -1 = no/lost response
+// Time-based 40s window (exact regardless of poll rate). Each entry: { ts, ms }.
+// ms = -1 means lost / no response.
+const PING_WINDOW_MS = 40000;
+const pingHistory: { ts: number; ms: number }[] = [];
 
 function drawPingChart() {
   const ctx = pingHistCanvas.getContext('2d');
@@ -252,7 +255,7 @@ function drawPingChart() {
 
   // Baseline gridlines at 100/200ms (inferred range if data present)
   let max = 0, min = 0;
-  for (const v of pingHistory) { if (v > 0) { if (v > max) max = v; if (min === 0 || v < min) min = v; } }
+  for (const e of pingHistory) { const v = e.ms; if (v > 0) { if (v > max) max = v; if (min === 0 || v < min) min = v; } }
   if (max === 0) max = 300; // nothing yet — show full 0..300 scale
   if (min > max) min = 0;
   const range = (max - min) || 1;
@@ -269,11 +272,13 @@ function drawPingChart() {
 
   const n = pingHistory.length;
   if (n < 2) return;
+  const tNow = Date.now();
+  const xOf = (ts: number) => ((tNow - ts) / PING_WINDOW_MS) * W;
   ctx.lineWidth = 1.6;
   for (let i = 1; i < n; i++) {
-    const x0 = ((i - 1) / (PING_HISTORY - 1)) * W;
-    const x1 = (i / (PING_HISTORY - 1)) * W;
-    const v0 = pingHistory[i - 1], v1 = pingHistory[i];
+    const e0 = pingHistory[i - 1], e1 = pingHistory[i];
+    const x0 = xOf(e0.ts), x1 = xOf(e1.ts);
+    const v0 = e0.ms, v1 = e1.ms;
     const y0 = v0 > 0 ? yOf(v0) : H - pad;
     const y1 = v1 > 0 ? yOf(v1) : H - pad;
     const v = v1 > 0 ? v1 : v0;
@@ -283,16 +288,16 @@ function drawPingChart() {
 
   // current point dot
   const last = pingHistory[n - 1];
-  if (last > 0) {
-    const lx = ((n - 1) / (PING_HISTORY - 1)) * W;
-    const ly = yOf(last);
+  if (last.ms > 0) {
+    const lx = xOf(last.ts);
+    const ly = yOf(last.ms);
     ctx.fillStyle = '#00ff88';
     ctx.beginPath(); ctx.arc(lx, ly, 2.5, 0, Math.PI * 2); ctx.fill();
   }
 }
 
 function updatePingStats() {
-  const valid = pingHistory.filter(v => v > 0);
+  const valid = pingHistory.filter(e => e.ms > 0).map(e => e.ms);
   if (!valid.length) {
     pingStatAvg.textContent = '–ms'; pingStatJit.textContent = '±–ms';
     pingStatMin.textContent = '–ms'; pingStatMax.textContent = '–ms';
@@ -325,8 +330,10 @@ async function sampleLoss() {
   const pct = Math.round((lostCount / lossRing.length) * 100);
   lossValue.textContent = `${pct}%`;
 
-  pingHistory.push(ms ?? -1);
-  if (pingHistory.length > PING_HISTORY) pingHistory.shift();
+  pingHistory.push({ ts: Date.now(), ms: ms ?? -1 });
+  // prune anything older than the visible window
+  const cutoff = Date.now() - PING_WINDOW_MS;
+  while (pingHistory.length && pingHistory[0].ts < cutoff) pingHistory.shift();
   if (logSection.classList.contains('expanded')) { drawPingChart(); updatePingStats(); }
 }
 
@@ -382,7 +389,7 @@ async function watchdogCheck() {
   if (Date.now() - lastGoodPingTs > NO_PING_DISCONNECT_MS) {
     watchdogTripped = true;
     try { await invoke('stop_proxy'); } catch { /* ignore */ }
-    showMessage('VPN auto-disconnected: no ping for 10s — you are no longer protected.', true);
+    showMessage('VPN auto-disconnected: no ping for 20s — you are no longer protected.', true);
   }
 }
 
@@ -437,7 +444,7 @@ let hasPingResponse = false;
 // Auto-disconnect watchdog: armed only after we've seen at least one good ping.
 // If the link then goes silent (no successful ping) for this long, tear the
 // tunnel down so the UI never hangs waiting on a dead/stalled connection.
-const NO_PING_DISCONNECT_MS = 10000;
+const NO_PING_DISCONNECT_MS = 20000;
 let lastGoodPingTs = 0;   // timestamp of last successful ping (0 = not yet connected)
 let watchdogTripped = false;
 let watchTimer: ReturnType<typeof setInterval> | null = null;
@@ -675,11 +682,12 @@ async function loadSettings() {
     settingTunStack.value = cfg.tun_stack || 'system';
 
     // Load split mode
-    const splitSettings = await invoke<{ split_mode: string; wow_apps?: string[] }>('get_split_settings');
+    const splitSettings = await invoke<{ split_mode: string; wow_apps?: string[]; wow_domains?: boolean }>('get_split_settings');
     const mode = splitSettings.split_mode || 'full';
 
-    // Set WoW app checkboxes (default all checked)
+    // Set WoW app checkboxes + domains toggle (default all checked)
     const apps = splitSettings.wow_apps || ['discord', 'chrome', 'telegram'];
+    wowDomains.checked = splitSettings.wow_domains !== false;
     wowAppDiscord.checked = apps.includes('discord');
     wowAppChrome.checked = apps.includes('chrome');
     wowAppTelegram.checked = apps.includes('telegram');
@@ -699,13 +707,25 @@ function updateSplitPresetUI(preset: string) {
   wowInfoContainer.style.display = preset === 'wow' ? 'block' : 'none';
 }
 
-// Gather currently-checked WoW app ids
+// Gather currently-checked WoW app ids + domains toggle
 function getWowApps(): string[] {
   const apps: string[] = [];
   if (wowAppDiscord.checked) apps.push('discord');
   if (wowAppChrome.checked) apps.push('chrome');
   if (wowAppTelegram.checked) apps.push('telegram');
   return apps;
+}
+
+function getWowDomains(): boolean {
+  return wowDomains.checked;
+}
+
+// Verify at least one of the four options is selected (client-side guard;
+// backend enforces the same rule and returns an error otherwise).
+function validateWowSelection(): boolean {
+  const ok = getWowDomains() || getWowApps().length > 0;
+  wowSelectionError.style.display = ok ? 'none' : 'block';
+  return ok;
 }
 
 // Split preset card handlers
@@ -716,11 +736,13 @@ splitPresetCards.forEach(card => {
 
     try {
       const running = await invoke('get_status');
+      if (preset === 'wow' && !validateWowSelection()) return;
       await invoke('update_settings', {
         mtu: settingMtu.value ? parseInt(settingMtu.value, 10) : null,
         splitMode: preset,
         tunStack: settingTunStack.value,
         wowApps: preset === 'wow' ? getWowApps() : null,
+        wowDomains: preset === 'wow' ? getWowDomains() : null,
         reconnect: running
       });
       showMessage('Settings saved', false);
@@ -755,7 +777,8 @@ btnSaveSettings.addEventListener('click', async () => {
     const splitMode = activeCard ? activeCard.dataset.preset || 'full' : 'full';
 
     const running = await invoke('get_status');
-    await invoke('update_settings', { mtu, splitMode, tunStack: settingTunStack.value, wowApps: splitMode === 'wow' ? getWowApps() : null, reconnect: running });
+    if (splitMode === 'wow' && !validateWowSelection()) return;
+    await invoke('update_settings', { mtu, splitMode, tunStack: settingTunStack.value, wowApps: splitMode === 'wow' ? getWowApps() : null, wowDomains: splitMode === 'wow' ? getWowDomains() : null, reconnect: running });
     showMessage('Settings saved', false);
     if (running) showMessage('Reconnecting...', false);
   } catch (e) {
@@ -890,9 +913,10 @@ document.querySelectorAll('.h2-preset-card').forEach(card => {
 
   // Highlight the active split preset card on launch (full tunnel by default)
   try {
-    const splitSettings = await invoke<{ split_mode: string; wow_apps?: string[] }>('get_split_settings');
+    const splitSettings = await invoke<{ split_mode: string; wow_apps?: string[]; wow_domains?: boolean }>('get_split_settings');
     updateSplitPresetUI(splitSettings.split_mode || 'full');
     const apps = splitSettings.wow_apps || ['discord', 'chrome', 'telegram'];
+    wowDomains.checked = splitSettings.wow_domains !== false;
     wowAppDiscord.checked = apps.includes('discord');
     wowAppChrome.checked = apps.includes('chrome');
     wowAppTelegram.checked = apps.includes('telegram');

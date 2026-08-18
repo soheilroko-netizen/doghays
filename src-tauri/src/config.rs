@@ -20,6 +20,8 @@ pub struct Config {
     pub split_mode: String, // "full", "wow"
     #[serde(default)]
     pub wow_apps: Vec<String>, // checked app ids for WoW split: "discord","chrome","telegram"
+    #[serde(default = "wow_domains_default")]
+    pub wow_domains: bool, // tunnel Blizzard domains (4th optional toggle)
 
     pub mode: String,
 
@@ -149,6 +151,20 @@ pub fn load_wow_apps() -> Vec<String> {
     }
 }
 
+fn wow_domains_default() -> bool { true }
+
+/// Save WoW-domains toggle (whether Blizzard domains are tunneled) to config.json
+pub fn save_wow_domains(enabled: bool) -> Result<()> {
+    let mut existing = load_config_json();
+    existing["wow_domains"] = serde_json::Value::Bool(enabled);
+    save_config_json(&existing)
+}
+
+/// Load WoW-domains toggle; defaults to true (tunneled) if absent
+pub fn load_wow_domains() -> bool {
+    load_config_json()["wow_domains"].as_bool().unwrap_or(true)
+}
+
 /// Profile descriptor returned by [`parse_profile`]
 pub struct ProfileInfo {
     /// Display name, e.g. "Netherlands #1"
@@ -244,6 +260,7 @@ fn default_config() -> Config {
         mtu: None,
         split_mode: "full".to_string(),
         wow_apps: vec!["discord".to_string(), "chrome".to_string(), "telegram".to_string()],
+        wow_domains: true,
         mode: "shadowtls".to_string(),
         h2_port: 40001,
         h2_password: String::new(),
@@ -265,6 +282,7 @@ pub fn get_active_config() -> Config {
     // Split mode from config.json overrides profile default
     cfg.split_mode = load_split_mode();
     cfg.wow_apps = load_wow_apps();
+    cfg.wow_domains = load_wow_domains();
     cfg.tun_stack = load_tun_stack();
 
     cfg
