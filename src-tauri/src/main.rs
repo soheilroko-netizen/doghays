@@ -4,6 +4,7 @@
 mod config;
 mod proxy;
 mod doh;
+mod job;
 
 use config::{Config};
 #[cfg(target_os = "windows")]

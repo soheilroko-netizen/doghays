@@ -1,6 +1,7 @@
 // proxy.rs - sing-box proxy manager (VPN-only)
 use anyhow::{bail, Context, Result};
 use crate::config::Config;
+use crate::job::WinJob;
 use directories::ProjectDirs;
 use std::fs;
 use std::io::{Read, Write};
@@ -57,6 +58,8 @@ pub struct ProxyManager {
     monitor: Arc<Mutex<Option<thread::JoinHandle<()>>>>,
     /// Tray/app handle used by the monitor to emit state-change events.
     app_handle: Arc<Mutex<Option<tauri::AppHandle>>>,
+    /// Windows Job Object (kill-on-close). When dropped, the OS kills sing-box.
+    job: Arc<Mutex<Option<WinJob>>>,
     config_dir: PathBuf,
     config: Config,
     active_mode: Arc<Mutex<Option<String>>>,
@@ -78,6 +81,7 @@ impl ProxyManager {
             state: Arc::new(Mutex::new(VpnState::Stopped)),
             monitor: Arc::new(Mutex::new(None)),
             app_handle: Arc::new(Mutex::new(None)),
+            job: Arc::new(Mutex::new(None)),
             config_dir: config_dir.clone(),
             config,
             active_mode: Arc::new(Mutex::new(None)),
@@ -320,6 +324,21 @@ impl ProxyManager {
         *self.state.lock().unwrap() = VpnState::Running;
         self.debug_log("[start] state -> Running");
 
+        // Attach sing-box to a kill-on-close Job Object so it is terminated by
+        // the OS if THIS process exits unexpectedly (e.g. Task Manager kill).
+        if let Some(pid) = self.pid() {
+            match WinJob::create() {
+                Ok(mut job) => match job.assign_pid(pid) {
+                    Ok(()) => {
+                        self.debug_log(format!("[job] assigned sing-box pid {pid} to kill-on-close job"));
+                        *self.job.lock().unwrap() = Some(job);
+                    }
+                    Err(e) => self.debug_log(format!("[job] assign failed (non-fatal): {e}")),
+                },
+                Err(e) => self.debug_log(format!("[job] create failed (non-fatal): {e}")),
+            }
+        }
+
         // Spawn the monitor that detects unexpected sing-box exit.
         self.spawn_monitor();
 
@@ -340,6 +359,9 @@ impl ProxyManager {
             let _ = child.kill();
             let _ = child.wait();
         }
+        // Dropping the WinJob closes the job handle; with KillOnJobClose any
+        // still-living assigned process (sing-box) is terminated by the OS.
+        *self.job.lock().unwrap() = None;
         // Stop the monitor thread (it will observe the empty child and exit).
         if let Some(h) = self.monitor.lock().unwrap().take() {
             let _ = h.join();
@@ -355,9 +377,14 @@ impl ProxyManager {
         }
     }
 
-    /// Launch a background thread that waits on the sing-box child and, if it
+    /// Launch a background thread that watches the sing-box child and, if it
     /// exits unexpectedly while we believe we are Running, resets state and
     /// emits a `vpn-state` event with a human-readable message (Test 5).
+    ///
+    /// CRITICAL: the monitor must NOT hold `self.child` while waiting for the
+    /// process — the main thread polls `is_running()` (via the frontend status
+    /// timer) and would block on the same mutex, freezing the UI. So we poll
+    /// `try_wait()` in short intervals and release the lock between polls.
     fn spawn_monitor(&self) {
         self.stop_monitor();
 
@@ -368,56 +395,66 @@ impl ProxyManager {
         let log_path = self.debug_log_path.clone();
 
         let handle = thread::spawn(move || {
-            // Try to get a handle to the child; if it's already gone, exit.
-            let pid = { child_arc.lock().unwrap().as_ref().map(|c| c.id()) };
-            if pid.is_none() {
-                return;
-            }
-            // Block until the child exits.
-            let exit = {
-                let mut guard = child_arc.lock().unwrap();
-                match guard.as_mut() {
-                    Some(child) => child.wait(),
-                    None => return,
-                }
-            };
-            match exit {
-                Ok(status) => {
-                    let _ = fs::OpenOptions::new()
-                        .create(true)
-                        .append(true)
-                        .open(&log_path)
-                        .map(|mut f| {
-                            use std::io::Write;
-                            let _ = writeln!(f, "[monitor] sing-box exited unexpectedly: {status}");
-                        });
-                }
-                Err(e) => {
-                    let _ = fs::OpenOptions::new()
-                        .create(true)
-                        .append(true)
-                        .open(&log_path)
-                        .map(|mut f| {
-                            use std::io::Write;
-                            let _ = writeln!(f, "[monitor] error waiting on sing-box: {e}");
-                        });
-                }
-            }
-            // If we were Running (not intentionally Stopping), the process
-            // died on its own — reset to Stopped and notify the UI.
-            let was_running = *state_arc.lock().unwrap() == VpnState::Running;
-            if was_running {
-                // Clear child handle so is_running()/reset agree.
-                *child_arc.lock().unwrap() = None;
-                *state_arc.lock().unwrap() = VpnState::Stopped;
-                if let Some(app) = app_arc.lock().unwrap().as_ref() {
-                    let _ = app.emit(
-                        "vpn-state",
-                        serde_json::json!({
-                            "state": "stopped",
-                            "message": "The VPN connection was lost.\nThe VPN process stopped unexpectedly."
-                        }),
-                    );
+            // Poll briefly; never hold the shared child lock during a long wait.
+            loop {
+                std::thread::sleep(std::time::Duration::from_millis(400));
+
+                // Acquire the lock only long enough to ask the child's status.
+                let exited: Option<std::process::ExitStatus> = {
+                    let mut guard = child_arc.lock().unwrap();
+                    match guard.as_mut() {
+                        Some(child) => match child.try_wait() {
+                            Ok(Some(status)) => Some(status),
+                            Ok(None) => None, // still running
+                            Err(e) => {
+                                let _ = fs::OpenOptions::new()
+                                    .create(true)
+                                    .append(true)
+                                    .open(&log_path)
+                                    .map(|mut f| {
+                                        use std::io::Write;
+                                        let _ = writeln!(f, "[monitor] try_wait error: {e}");
+                                    });
+                                Some(std::process::ExitStatus::default())
+                            }
+                        },
+                        None => {
+                            // Child was taken over by stop()/reset — nothing to watch.
+                            break;
+                        }
+                    }
+                };
+
+                match exited {
+                    Some(status) => {
+                        // Process exited. Clear the shared slot.
+                        *child_arc.lock().unwrap() = None;
+                        let _ = fs::OpenOptions::new()
+                            .create(true)
+                            .append(true)
+                            .open(&log_path)
+                            .map(|mut f| {
+                                use std::io::Write;
+                                let _ = writeln!(f, "[monitor] sing-box exited unexpectedly: {status}");
+                            });
+                        // If we were Running (not intentionally Stopping), the
+                        // process died on its own — reset and notify the UI.
+                        let was_running = *state_arc.lock().unwrap() == VpnState::Running;
+                        if was_running {
+                            *state_arc.lock().unwrap() = VpnState::Stopped;
+                            if let Some(app) = app_arc.lock().unwrap().as_ref() {
+                                let _ = app.emit(
+                                    "vpn-state",
+                                    serde_json::json!({
+                                        "state": "stopped",
+                                        "message": "The VPN connection was lost.\nThe VPN process stopped unexpectedly."
+                                    }),
+                                );
+                            }
+                        }
+                        break;
+                    }
+                    None => { /* still running — keep polling */ }
                 }
             }
         });
