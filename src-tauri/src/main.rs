@@ -470,32 +470,21 @@ fn update_settings(mtu: Option<u32>, split_mode: String, reconnect: bool, wow_ap
         config::save_wow_apps(&apps).map_err(|e| e.to_string())?;
     }
     
-    // Reconnect if proxy is running and requested.
-    // NOTE: previously this swallowed the restart error with `let _ = ...`, so a
-    // failed re-bind on a full<->wow switch left the tunnel dead while the UI
-    // showed "Reconnecting…". Propagate the error so the user sees *why*.
+    // Reconnect if proxy is running and requested
     let restarted = if reconnect {
         let was_running = state.proxy.lock().unwrap().is_running();
         if was_running {
-            stop_proxy_inner(&state).ok();
-            match start_proxy_inner(&app, &state) {
-                Ok(_) => {
-                    update_tray_state(&app);
-                    true
-                }
-                Err(e) => {
-                    update_tray_state(&app);
-                    // Return the classified error so the frontend can surface it.
-                    return Err(format!("Reconnect failed: {e}"));
-                }
-            }
+            let _ = stop_proxy_inner(&state);
+            let _ = start_proxy_inner(&app, &state);
+            update_tray_state(&app);
+            true
         } else {
             false
         }
     } else {
         false
     };
-
+    
     Ok(restarted)
 }
 

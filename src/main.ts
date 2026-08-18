@@ -239,29 +239,24 @@ const LOSS_SAMPLES = 30;
 const LOSS_TIMEOUT_MS = 1000; // latency above this counts as loss (gaming: 1s is an eternity)
 const lossRing: boolean[] = []; // true = lost
 
-// Ping history for the chart in the expandable "Ping" panel.
-// Time-based 20s window (exact regardless of poll rate). Each entry: { ts, ms }.
-// ms = -1 means lost / no response.
-const PING_WINDOW_MS = 20000;
-const pingHistory: { ts: number; ms: number }[] = [];
+// Ping history ring buffer (for the chart in the expandable "Ping" panel).
+// Sample timestamp is implicit: PING_INTERVAL_MS apart. Keep last 60 samples.
+const PING_HISTORY = 60;
+const pingHistory: number[] = []; // ms per sample, -1 = no/lost response
 
-function drawPingChart(hoverX?: number) {
+function drawPingChart() {
   const ctx = pingHistCanvas.getContext('2d');
   if (!ctx) return;
   const W = pingHistCanvas.width, H = pingHistCanvas.height, pad = 4;
-  // Window spans [now - WINDOW, now] so the newest sample sits at the right edge.
-  const now = Date.now();
-  const t0 = now - PING_WINDOW_MS;
   ctx.clearRect(0, 0, W, H);
 
-  // Baseline gridlines
+  // Baseline gridlines at 100/200ms (inferred range if data present)
   let max = 0, min = 0;
-  for (const s of pingHistory) { if (s.ms > 0) { if (s.ms > max) max = s.ms; if (min === 0 || s.ms < min) min = s.ms; } }
+  for (const v of pingHistory) { if (v > 0) { if (v > max) max = v; if (min === 0 || v < min) min = v; } }
   if (max === 0) max = 300; // nothing yet — show full 0..300 scale
   if (min > max) min = 0;
   const range = (max - min) || 1;
   const yOf = (v: number) => H - pad - ((Math.min(v, max) - min) / range) * (H - 2 * pad);
-  const xOf = (ts: number) => ((ts - t0) / PING_WINDOW_MS) * W;
 
   ctx.strokeStyle = 'rgba(255,255,255,0.08)';
   ctx.lineWidth = 1;
@@ -272,55 +267,42 @@ function drawPingChart(hoverX?: number) {
     }
   }
 
-  const pts = pingHistory.filter(s => s.ts >= t0);
-  if (pts.length >= 2) {
-    ctx.lineWidth = 1.6;
-    for (let i = 1; i < pts.length; i++) {
-      const v0 = pts[i - 1], v1 = pts[i];
-      const x0 = xOf(v0.ts), x1 = xOf(v1.ts);
-      const y0 = v0.ms > 0 ? yOf(v0.ms) : H - pad;
-      const y1 = v1.ms > 0 ? yOf(v1.ms) : H - pad;
-      const v = v1.ms > 0 ? v1.ms : v0.ms;
-      ctx.strokeStyle = v > 300 ? '#ff3366' : v > 200 ? '#ff6b35' : v > 145 ? '#ffcc00' : '#00ff88';
-      ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
-    }
-    // current dot
-    const last = pts[pts.length - 1];
-    if (last.ms > 0) {
-      const lx = xOf(last.ts), ly = yOf(last.ms);
-      ctx.fillStyle = '#00ff88';
-      ctx.beginPath(); ctx.arc(lx, ly, 2.5, 0, Math.PI * 2); ctx.fill();
-    }
+  const n = pingHistory.length;
+  if (n < 2) return;
+  ctx.lineWidth = 1.6;
+  for (let i = 1; i < n; i++) {
+    const x0 = ((i - 1) / (PING_HISTORY - 1)) * W;
+    const x1 = (i / (PING_HISTORY - 1)) * W;
+    const v0 = pingHistory[i - 1], v1 = pingHistory[i];
+    const y0 = v0 > 0 ? yOf(v0) : H - pad;
+    const y1 = v1 > 0 ? yOf(v1) : H - pad;
+    const v = v1 > 0 ? v1 : v0;
+    ctx.strokeStyle = v > 300 ? '#ff3366' : v > 200 ? '#ff6b35' : v > 145 ? '#ffcc00' : '#00ff88';
+    ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
   }
 
-  // Hover marker + nearest-sample highlight
-  if (hoverX != null && pts.length) {
-    let best = pts[0], bestD = Infinity;
-    for (const s of pts) { const d = Math.abs(xOf(s.ts) - hoverX); if (d < bestD) { bestD = d; best = s; } }
-    const hx = xOf(best.ts), hy = best.ms > 0 ? yOf(best.ms) : H - pad;
-    ctx.strokeStyle = 'rgba(255,255,255,0.25)';
-    ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(hx, 0); ctx.lineTo(hx, H); ctx.stroke();
-    if (best.ms > 0) {
-      ctx.fillStyle = '#fff';
-      ctx.beginPath(); ctx.arc(hx, hy, 3, 0, Math.PI * 2); ctx.fill();
-    }
+  // current point dot
+  const last = pingHistory[n - 1];
+  if (last > 0) {
+    const lx = ((n - 1) / (PING_HISTORY - 1)) * W;
+    const ly = yOf(last);
+    ctx.fillStyle = '#00ff88';
+    ctx.beginPath(); ctx.arc(lx, ly, 2.5, 0, Math.PI * 2); ctx.fill();
   }
 }
 
 function updatePingStats() {
-  const now = Date.now();
-  const valid = pingHistory.filter(s => s.ms > 0 && now - s.ts <= PING_WINDOW_MS);
+  const valid = pingHistory.filter(v => v > 0);
   if (!valid.length) {
     pingStatAvg.textContent = '–ms'; pingStatJit.textContent = '±–ms';
     pingStatMin.textContent = '–ms'; pingStatMax.textContent = '–ms';
     return;
   }
-  const sum = valid.reduce((a, b) => a + b.ms, 0);
+  const sum = valid.reduce((a, b) => a + b, 0);
   const avg = Math.round(sum / valid.length);
-  const mn = Math.min(...valid.map(s => s.ms)), mx = Math.max(...valid.map(s => s.ms));
+  const mn = Math.min(...valid), mx = Math.max(...valid);
   // jitter ~= mean absolute deviation from the average (simple, stable)
-  const jit = Math.round(valid.reduce((a, b) => a + Math.abs(b.ms - avg), 0) / valid.length);
+  const jit = Math.round(valid.reduce((a, b) => a + Math.abs(b - avg), 0) / valid.length);
   pingStatAvg.textContent = `${avg}ms`;
   pingStatJit.textContent = `±${jit}ms`;
   pingStatMin.textContent = `${mn}ms`;
@@ -343,47 +325,10 @@ async function sampleLoss() {
   const pct = Math.round((lostCount / lossRing.length) * 100);
   lossValue.textContent = `${pct}%`;
 
-  // Push a time-stamped sample; prune anything older than the visible window.
-  pingHistory.push({ ts: Date.now(), ms: ms ?? -1 });
-  const cutoff = Date.now() - PING_WINDOW_MS - 1000;
-  while (pingHistory.length && pingHistory[0].ts < cutoff) pingHistory.shift();
+  pingHistory.push(ms ?? -1);
+  if (pingHistory.length > PING_HISTORY) pingHistory.shift();
   if (logSection.classList.contains('expanded')) { drawPingChart(); updatePingStats(); }
 }
-
-// ── Chart hover tooltip ────────────────────────────────────
-// Overlaid div; shows the ping value + age at the cursor's x position.
-const pingTip = document.createElement('div');
-pingTip.id = 'ping-tip';
-pingTip.style.cssText =
-  'position:absolute;pointer-events:none;display:none;z-index:20;' +
-  'background:rgba(0,0,0,0.85);border:1px solid var(--border);border-radius:4px;' +
-  'padding:3px 6px;font:11px/1.3 monospace;color:#fff;white-space:nowrap;transform:translate(-50%,-120%)';
-pingChartWrap.style.position = 'relative';
-pingChartWrap.appendChild(pingTip);
-
-pingHistCanvas.addEventListener('mousemove', (e: MouseEvent) => {
-  const rect = pingHistCanvas.getBoundingClientRect();
-  const x = ((e.clientX - rect.left) / rect.width) * pingHistCanvas.width;
-  drawPingChart(x);
-  // nearest sample by x
-  const now = Date.now();
-  const t0 = now - PING_WINDOW_MS;
-  const pts = pingHistory.filter(s => s.ts >= t0);
-  if (pts.length) {
-    let best = pts[0], bestD = Infinity;
-    const xOf = (ts: number) => ((ts - t0) / PING_WINDOW_MS) * pingHistCanvas.width;
-    for (const s of pts) { const d = Math.abs(xOf(s.ts) - x); if (d < bestD) { bestD = d; best = s; } }
-    const ageSec = Math.max(0, Math.round((now - best.ts) / 1000));
-    pingTip.textContent = best.ms > 0 ? `${best.ms}ms · ${ageSec}s ago` : `lost · ${ageSec}s ago`;
-    pingTip.style.left = `${(best.ts - t0) / PING_WINDOW_MS * 100}%`;
-    pingTip.style.top = '0px';
-    pingTip.style.display = 'block';
-  }
-});
-pingHistCanvas.addEventListener('mouseleave', () => {
-  pingTip.style.display = 'none';
-  if (logSection.classList.contains('expanded')) drawPingChart();
-});
 
 async function doPing() {
   // Overlap guard: if the previous ping is still in flight (e.g. a stalled
@@ -780,13 +725,10 @@ splitPresetCards.forEach(card => {
       });
       showMessage('Settings saved', false);
       if (running) {
-        // Reconnect happens inside update_settings and may fail — it now returns
-        // an error on failure (no silent dead tunnel). If we reach here it succeeded.
-        showMessage('Reconnected with new split settings', false);
+        showMessage('Reconnecting with new split settings...', false);
       }
     } catch (e) {
-      // e may be "Reconnect failed: <reason>" from the backend.
-      showMessage(`${e}`, true);
+      showMessage(`Failed: ${e}`, true);
     }
   });
 });
@@ -815,9 +757,9 @@ btnSaveSettings.addEventListener('click', async () => {
     const running = await invoke('get_status');
     await invoke('update_settings', { mtu, splitMode, tunStack: settingTunStack.value, wowApps: splitMode === 'wow' ? getWowApps() : null, reconnect: running });
     showMessage('Settings saved', false);
-    if (running) showMessage('Reconnected with new settings', false);
+    if (running) showMessage('Reconnecting...', false);
   } catch (e) {
-    showMessage(`${e}`, true);
+    showMessage(`Failed: ${e}`, true);
   }
 });
 
