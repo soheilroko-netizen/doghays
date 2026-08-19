@@ -488,10 +488,7 @@
   color: var(--text-primary);
 }
 
-.ping-stats span:first-child b { color: var(--ping-green); }
-.ping-stats span:nth-child(2) b { color: var(--accent-h2); }
-.ping-stats span:nth-child(3) b { color: var(--ping-yellow); }
-.ping-stats span:nth-child(4) b { color: var(--ping-red); }
+.ping-stats span:first-child b, .ping-stats span:nth-child(2) b, .ping-stats span:nth-child(3) b, .ping-stats span:nth-child(4) b { color: #fff; }
 
 /* ── Mode Toggle (Legacy) ────────────────────────────────── */
 

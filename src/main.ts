@@ -273,8 +273,8 @@ function drawPingChart() {
   const n = pingHistory.length;
   if (n < 2) return;
   const tNow = Date.now();
-  const xOf = (ts: number) => ((tNow - ts) / PING_WINDOW_MS) * W;
-  ctx.lineWidth = 1.6;
+  const xOf = (ts: number) => W - ((tNow - ts) / PING_WINDOW_MS) * W;
+    ctx.lineWidth = 2.4; // heavier line for smoother appearance
   for (let i = 1; i < n; i++) {
     const e0 = pingHistory[i - 1], e1 = pingHistory[i];
     const x0 = xOf(e0.ts), x1 = xOf(e1.ts);
