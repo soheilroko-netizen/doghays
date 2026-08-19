@@ -18,16 +18,32 @@ fn check_single_instance() {
             lpName: *const i8,
         ) -> *mut std::ffi::c_void;
         fn GetLastError() -> u32;
+        fn FindWindowA(lpClassName: *const i8, lpWindowName: *const i8) -> *mut std::ffi::c_void;
+        fn ShowWindow(hWnd: *mut std::ffi::c_void, nCmdShow: i32) -> i32;
+        fn SetForegroundWindow(hWnd: *mut std::ffi::c_void) -> i32;
     }
+    const ERROR_ALREADY_EXISTS: u32 = 183;
+    const SW_RESTORE: i32 = 9;
+
+    // Try to claim the app-wide mutex. If it already exists, another instance
+    // owns it: bring that existing window to the foreground instead of silently
+    // dying, so the user sees "dakal is already running" rather than nothing.
     let name = CString::new("Local\\stls-single-instance-mutex").unwrap();
     let handle = unsafe { CreateMutexA(ptr::null_mut(), 0, name.as_ptr()) };
     if handle.is_null() {
         eprintln!("[stls] CreateMutexA failed");
         return;
     }
-    const ERROR_ALREADY_EXISTS: u32 = 183;
     if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
-        println!("[stls] Another instance is already running — exiting.");
+        let title = CString::new("dakal").unwrap();
+        let hwnd = unsafe { FindWindowA(ptr::null_mut(), title.as_ptr()) };
+        if !hwnd.is_null() {
+            unsafe {
+                ShowWindow(hwnd, SW_RESTORE);
+                SetForegroundWindow(hwnd);
+            }
+        }
+        println!("[stls] Another instance is already running — showing existing window and exiting.");
         std::process::exit(0);
     }
 }
@@ -590,7 +606,7 @@ fn doh_active() -> Result<bool, String> {
 fn create_main_window(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
         .title("dakal")
-        .inner_size(500.0, 780.0)
+        .inner_size(500.0, 760.0)
         .resizable(false)
         .build()?;
     Ok(())

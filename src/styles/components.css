@@ -181,6 +181,27 @@ textarea:focus {
   }
 }
 
+/* ── WoW Split Mode options: label left, checkbox right-aligned ── */
+.wow-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.wow-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #ddd;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.wow-option input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+}
+
 /* ── Info Values ─────────────────────────────────────────── */
 
 .label {

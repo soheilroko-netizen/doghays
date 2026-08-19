@@ -5,10 +5,10 @@
 .container {
   background: var(--bg-secondary);
   border-radius: 16px;
-  padding: 20px;
+  padding: 16px;
   width: 450px;
-  max-height: 96vh;
-  overflow-y: auto;
+  max-height: none;
+  overflow: visible;
   box-shadow: var(--shadow-lg);
 }
 
