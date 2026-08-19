@@ -312,7 +312,7 @@ impl ProxyManager {
             },
             "dns": {
                 "servers": [
-                    {"type": "https", "tag": "remote-doh", "server": "dns.google", "server_port": 443, "path": "/dns-query", "detour": final_outbound, "address_resolver": "bootstrap"},
+                    {"type": "https", "tag": "remote-doh", "server": "dns.google", "server_port": 443, "path": "/dns-query", "detour": final_outbound},
                     {"type": "udp", "tag": "bootstrap", "server": "1.1.1.1", "server_port": 53, "detour": final_outbound}
                 ],
                 "final": "remote-doh",
