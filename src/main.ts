@@ -770,9 +770,20 @@ splitPresetCards.forEach(card => {
 });
 
 // ── Settings panel toggle ─────────────
+const appContainer = document.getElementById('app')!;
 btnSettingsToggle.addEventListener('click', async () => {
   const visible = settingsPanel.style.display !== 'none';
   settingsPanel.style.display = visible ? 'none' : 'block';
+
+  // While settings are open, allow scrolling the app if content exceeds the
+  // window height; hide the scrollbar again when settings are closed.
+  if (visible) {
+    appContainer.style.overflowY = 'hidden';
+    appContainer.style.maxHeight = '';
+  } else {
+    appContainer.style.overflowY = 'auto';
+    appContainer.style.maxHeight = '100vh';
+  }
 
   const appWindow = getCurrentWindow();
   if (visible) {
