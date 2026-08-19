@@ -52,6 +52,7 @@ fn check_single_instance() {
 fn check_single_instance() {}
 
 use std::sync::Mutex;
+use std::sync::Arc;
 use std::time::Instant;
 
 static SING_BOX_CLIENT: std::sync::OnceLock<reqwest::blocking::Client> = std::sync::OnceLock::new();
@@ -98,11 +99,11 @@ struct TrafficSample {
 
 struct AppState {
     proxy: Mutex<ProxyManager>,
-    started_at: Mutex<Option<Instant>>,
+    started_at: Arc<Mutex<Option<Instant>>>,
     prev_sample: Mutex<Option<TrafficSample>>,
+    is_running_cache: Arc<Mutex<bool>>,
     http_client: reqwest::blocking::Client,
     cached_log: Mutex<(std::time::SystemTime, Vec<String>)>,
-    is_running_cache: Mutex<bool>,
 }
 
 // ── Tray menu rebuild helper ───────────────────────────────────
@@ -186,7 +187,10 @@ fn start_proxy_inner(_app: &tauri::AppHandle, state: &State<AppState>) -> Result
     // `vpn-state` (success) and `vpn-error` (failure) events, so the main
     // thread / UI can never freeze during startup.
     let mut proxy = state.proxy.lock().unwrap();
-    proxy.start();
+    // Pass the AppState clocks the worker sets once the tunnel is actually up.
+    let started_at = Arc::clone(&state.started_at);
+    let is_running_cache = Arc::clone(&state.is_running_cache);
+    proxy.start(started_at, is_running_cache);
     drop(proxy);
     // Frontend continues to poll get_status / react to events for the result.
     Ok(())
@@ -323,7 +327,7 @@ fn get_full_status(state: State<AppState>) -> Result<FullStatus, String> {
     };
 
     // Fetch traffic stats from Clash API (only if running)
-    let running = *state.is_running_cache.lock().unwrap();
+    let running = state.proxy.lock().unwrap().is_running();
     let (cur_up, cur_down) = if running {
         let client = sing_box_client();
         client
@@ -401,7 +405,11 @@ fn get_log(state: State<AppState>) -> Result<String, String> {
 
 #[tauri::command]
 fn real_ping(state: State<AppState>) -> Result<String, String> {
-    let running = *state.is_running_cache.lock().unwrap();
+    // Use the authoritative proxy state (same source as get_full_status), not
+    // is_running_cache — the cache can be stale while a background start is in
+    // flight, which previously made every ping fail and left the UI stuck on
+    // "Connecting..." even though the tunnel was up.
+    let running = state.proxy.lock().unwrap().is_running();
     if !running {
         return Err("VPN not connected".into());
     }
@@ -656,14 +664,14 @@ fn main() {
         .plugin(tauri_plugin_opener::init())
         .manage(AppState {
             proxy: Mutex::new(proxy_manager),
-            started_at: Mutex::new(None),
+            started_at: Arc::new(Mutex::new(None)),
             prev_sample: Mutex::new(None),
+            is_running_cache: Arc::new(Mutex::new(false)),
             http_client: reqwest::blocking::Client::builder()
                 .timeout(std::time::Duration::from_secs(3))
                 .build()
                 .unwrap(),
             cached_log: Mutex::new((std::time::SystemTime::UNIX_EPOCH, Vec::new())),
-            is_running_cache: Mutex::new(false),
         })
         .setup(|app| {
             // Give the proxy manager a handle so its monitor thread can emit

@@ -11,6 +11,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Instant;
 use tauri::Emitter;
 
 // ── Windows helper: spawn without console window ──────────────────
@@ -209,7 +210,11 @@ impl ProxyManager {
     /// Returns immediately. The real outcome is delivered to the frontend via
     /// the `vpn-state` event on success, or the `vpn-error` event on failure
     /// (the UI un-freezes with a message instead of hanging).
-    pub fn start(&mut self) {
+    ///
+    /// `started_at` / `is_running_cache` belong to `AppState` and are set here
+    /// (on the worker thread, when the tunnel actually comes up) — the async
+    /// `start()` cannot set them synchronously like the old blocking version.
+    pub fn start(&mut self, started_at: Arc<Mutex<Option<Instant>>>, is_running_cache: Arc<Mutex<bool>>) {
         // Prevent concurrent starts. If we are already starting/running/
         // stopping, do not spawn another sing-box instance (Test 3).
         let cur = self.state();
@@ -244,6 +249,8 @@ impl ProxyManager {
         let job = Arc::clone(&self.job);
         let config_dir = self.config_dir.clone();
         let dns_cache = Arc::clone(&self.dns_cache);
+        let started_at = Arc::clone(&started_at);
+        let is_running_cache = Arc::clone(&is_running_cache);
 
         thread::spawn(move || {
             // Re-read config from active mode (inside thread; config.rs reads disk)
@@ -288,7 +295,11 @@ impl ProxyManager {
 
             match tmp.start_inner() {
                 Ok(_) => {
-                    // start_inner already emitted Running via emit_state inside.
+                    // start_inner already set state -> Running and emitted it.
+                    // Record the uptime start + mark the running cache so the
+                    // ping/traffic samplers (which read these) work correctly.
+                    *started_at.lock().unwrap() = Some(Instant::now());
+                    *is_running_cache.lock().unwrap() = true;
                 }
                 Err(e) => {
                     // ANY failure during startup must return to a consistent
