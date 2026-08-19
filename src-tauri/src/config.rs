@@ -199,7 +199,7 @@ pub fn get_profile_config(profile: &str) -> Config {
 
     match profile {
         "netherlands-1-h2" => Config {
-            server_address: "ns.baft.uk".to_string(),
+            server_address: "5.255.116.43".to_string(),
             h2_sni: "ns.baft.uk".to_string(),
             h2_obfs: "salamander".to_string(),
             mode: "hysteria2".to_string(),
@@ -208,13 +208,13 @@ pub fn get_profile_config(profile: &str) -> Config {
             ..default_config()
         },
         "germany-3-stls" => Config {
-            server_address: "de3.baft.uk".to_string(),
+            server_address: "185.237.97.196".to_string(),
             mode: "shadowtls".to_string(),
             ss_password: stls_ss_password, stls_password, stls_sni,
             ..default_config()
         },
         "germany-3-h2" => Config {
-            server_address: "de3.baft.uk".to_string(),
+            server_address: "185.237.97.196".to_string(),
             h2_sni: "de3.baft.uk".to_string(),
             h2_obfs: "salamander".to_string(),
             mode: "hysteria2".to_string(),
@@ -223,13 +223,13 @@ pub fn get_profile_config(profile: &str) -> Config {
             ..default_config()
         },
         "finland-1-stls" => Config {
-            server_address: "fn.baft.uk".to_string(),
+            server_address: "62.238.60.136".to_string(),
             mode: "shadowtls".to_string(),
             ss_password: stls_ss_password, stls_password, stls_sni,
             ..default_config()
         },
         "finland-1-h2" => Config {
-            server_address: "fn.baft.uk".to_string(),
+            server_address: "62.238.60.136".to_string(),
             h2_sni: "fn.baft.uk".to_string(),
             h2_obfs: "salamander".to_string(),
             mode: "hysteria2".to_string(),
@@ -239,7 +239,7 @@ pub fn get_profile_config(profile: &str) -> Config {
         },
         // netherlands-1-stls (default) and any unknown profile
         _ => Config {
-            server_address: "ns.baft.uk".to_string(),
+            server_address: "5.255.116.43".to_string(),
             mode: "shadowtls".to_string(),
             ss_password: stls_ss_password, stls_password, stls_sni,
             ..default_config()
