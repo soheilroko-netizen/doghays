@@ -319,9 +319,25 @@ let isConnecting = false;
 let hasPingResponse = false;
 
 async function updateStatus() {
+  // Mark all metrics as updating for loading state
+  trafficUpValue.classList.add('updating');
+  trafficDownValue.classList.add('updating');
+  pingValue.classList.add('updating');
+  lossValue.classList.add('updating');
+  connectBtn.disabled = true;
+  connectBtn.textContent = '...';
+
   try {
     const s = await invoke<FullStatus>('get_full_status');
     uptimeRefresh = Date.now();
+
+    // Remove loading state
+    trafficUpValue.classList.remove('updating');
+    trafficDownValue.classList.remove('updating');
+    pingValue.classList.remove('updating');
+    lossValue.classList.remove('updating');
+    connectBtn.disabled = false;
+    connectBtn.textContent = s.running ? 'Disconnect' : 'Connect';
 
     // Handle connecting state
     if (s.running && !hasPingResponse) {

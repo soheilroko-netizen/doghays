@@ -229,16 +229,11 @@ fn get_uptime(state: State<AppState>) -> Result<u64, String> {
 
 #[tauri::command]
 fn get_full_status(state: State<AppState>) -> Result<FullStatus, String> {
-    let proxy = state.proxy.lock().unwrap();
-    let running = proxy.is_running();
-    let pid = proxy.pid();
-    let log_path = proxy.debug_log_path.clone();
-    drop(proxy);
-
-    let profile = config::load_profile();
-    let mode = config::parse_profile(&profile).protocol;
-
+    // Short-circuit if not running (fast path, no lock contention)
+    let running = *state.is_running_cache.lock().unwrap();
     if !running {
+        let profile = config::load_profile();
+        let mode = config::parse_profile(&profile).protocol;
         return Ok(FullStatus {
             running: false, mode: mode.to_string(), server: None, uptime_secs: 0, pid: None,
             traffic_up: 0, traffic_down: 0, total_up: 0, total_down: 0,
@@ -246,10 +241,19 @@ fn get_full_status(state: State<AppState>) -> Result<FullStatus, String> {
         });
     }
 
-    let cfg = config::get_active_config();
-    let uptime_secs = state.started_at.lock().unwrap().map(|s| s.elapsed().as_secs()).unwrap_or(0);
+    // Get lightweight stats first (minimal lock hold)
+    let (profile, mode, pid, uptime_secs, log_path) = {
+        let proxy = state.proxy.lock().unwrap();
+        let p = config::load_profile();
+        let m = config::parse_profile(&p).protocol;
+        let p_pid = proxy.pid();
+        let p_log = proxy.debug_log_path.clone();
+        let u = state.started_at.lock().unwrap().map(|s| s.elapsed().as_secs()).unwrap_or(0);
+        drop(proxy);
+        (p, m, p_pid, u, p_log)
+    };
 
-    // Read last 100 log lines (cache: only re-read if file changed)
+    // Read log file (outside critical section)
     let log_lines = {
         let modified = std::fs::metadata(&log_path)
             .and_then(|m| m.modified())
@@ -260,28 +264,35 @@ fn get_full_status(state: State<AppState>) -> Result<FullStatus, String> {
             None => false,
         };
         if needs_refresh {
-            if let Ok(content) = std::fs::read_to_string(&log_path) {
-                let mut lines: Vec<String> = content.lines().rev().take(LOG_LINE_LIMIT).map(String::from).collect();
-                lines.reverse();
-                cache.0 = std::time::SystemTime::now();
-                cache.1 = lines;
+            // Cap log file size to prevent reading huge files
+            if let Ok(meta) = std::fs::metadata(&log_path) {
+                if meta.len() > 1024 * 1024 { // 1MB cap
+                    cache.0 = std::time::SystemTime::now();
+                    cache.1 = vec!["Log file too large (cap 1MB)".to_string()];
+                } else if let Ok(content) = std::fs::read_to_string(&log_path) {
+                    let mut lines: Vec<String> = content.lines().rev().take(LOG_LINE_LIMIT).map(String::from).collect();
+                    lines.reverse();
+                    cache.0 = std::time::SystemTime::now();
+                    cache.1 = lines;
+                }
             }
         }
         cache.1.clone()
     };
 
-    // Fetch traffic stats from Clash API (only if running)
-    let running = *state.is_running_cache.lock().unwrap();
-    let (cur_up, cur_down) = if running {
+    // Fetch traffic stats from Clash API (may take time, outside lock)
+    let (cur_up, cur_down) = {
         let client = sing_box_client();
-        client
+        // Use shorter timeout for faster UI response
+        match client
             .get(format!("{CLASH_API_BASE}/connections"))
             .header("Authorization", format!("Bearer {CLASH_API_SECRET}"))
-            .timeout(std::time::Duration::from_secs(1))
+            .timeout(std::time::Duration::from_millis(500))
             .send()
             .ok()
             .and_then(|r| r.json::<serde_json::Value>().ok())
-            .map(|v| {
+        {
+            Some(v) => {
                 let up = v["upload_total"].as_u64().unwrap_or(0);
                 let down = v["download_total"].as_u64().unwrap_or(0);
                 if up == 0 && down == 0 {
@@ -295,30 +306,29 @@ fn get_full_status(state: State<AppState>) -> Result<FullStatus, String> {
                 } else {
                     (up, down)
                 }
-            })
-            .unwrap_or((0, 0))
-    } else {
-        (0, 0)
+            }
+            None => (0, 0),
+        }
     };
     let now = Instant::now();
-    let mut prev_sample = state.prev_sample.lock().unwrap();
-    let (traffic_up, traffic_down) = if let Some(prev) = prev_sample.as_ref() {
-        let elapsed = now.duration_since(prev.time).as_secs_f64();
-        if elapsed > TRAFFIC_SAMPLE_MIN_SECS {
-            let up_delta = cur_up.saturating_sub(prev.total.0);
-            let down_delta = cur_down.saturating_sub(prev.total.1);
-            *prev_sample = Some(TrafficSample { total: (cur_up, cur_down), time: now });
+    let (traffic_up, traffic_down, cfg_server) = {
+        let mut prev_sample = state.prev_sample.lock().unwrap();
+        let cur_total = (cur_up, cur_down);
+        let elapsed = now.duration_since(prev_sample.as_ref().map(|s| s.time).unwrap_or(now)).as_secs_f64();
+        let (tu, td) = if elapsed > TRAFFIC_SAMPLE_MIN_SECS {
+            let up_delta = cur_up.saturating_sub(prev_sample.as_ref().map(|s| s.total.0).unwrap_or(0));
+            let down_delta = cur_down.saturating_sub(prev_sample.as_ref().map(|s| s.total.1).unwrap_or(0));
+            *prev_sample = Some(TrafficSample { total: cur_total, time: now });
             ((up_delta as f64 / elapsed) as u64, (down_delta as f64 / elapsed) as u64)
         } else {
             (0, 0)
-        }
-    } else {
-        *prev_sample = Some(TrafficSample { total: (cur_up, cur_down), time: now });
-        (0, 0)
+        };
+        let cfg = config::get_active_config();
+        (tu, td, cfg.server_address)
     };
 
     Ok(FullStatus {
-        running: true, mode: mode.to_string(), server: Some(cfg.server_address), uptime_secs, pid,
+        running: true, mode: mode.to_string(), server: Some(cfg_server), uptime_secs, pid,
         traffic_up, traffic_down, total_up: cur_up, total_down: cur_down, log_lines,
     })
 }
