@@ -968,7 +968,11 @@ document.querySelectorAll('.h2-preset-card').forEach(card => {
     wowAppChrome.checked = apps.includes('chrome');
     wowAppTelegram.checked = apps.includes('telegram');
   } catch {
-    updateSplitPresetUI('full');
+    // On IPC failure, do NOT force the Full card active — that would mislead
+    // the user into thinking they're on full tunnel when the saved config may
+    // actually be WoW. Leave cards un-highlighted until Settings is opened.
+    splitPresetCards.forEach(card => card.classList.remove('active'));
+    wowInfoContainer.style.display = 'none';
   }
 
   await updateDohButton();
