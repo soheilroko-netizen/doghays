@@ -183,6 +183,14 @@ listen<{ state: string; message?: string }>('vpn-state', (event) => {
   updateStatus();
 }).catch((e) => console.error('failed to listen vpn-state', e));
 
+// Startup failures (resolve/check timeout, bad config, admin) arrive here
+// instead of freezing the UI. Show the message and refresh status so the
+// window leaves the "Starting..." state.
+listen<{ message: string }>('vpn-error', (event) => {
+  showMessage(event.payload.message, true);
+  updateStatus();
+}).catch((e) => console.error('failed to listen vpn-error', e));
+
 // ── Views ────────────────────────────────────────────────────
 function showView(view: 'main' | 'log') {
   mainView.style.display = view === 'main' ? 'block' : 'none';

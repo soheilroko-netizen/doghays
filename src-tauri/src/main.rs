@@ -168,35 +168,20 @@ fn update_tray_state(app: &tauri::AppHandle) {
 // ── Tauri commands ──────────────────────────────────────────────
 
 #[tauri::command]
-fn start_proxy(app: tauri::AppHandle, state: State<AppState>) -> Result<String, String> {
+fn start_proxy(app: tauri::AppHandle, state: State<AppState>) -> Result<(), String> {
     start_proxy_inner(&app, &state)
 }
 
-fn start_proxy_inner(app: &tauri::AppHandle, state: &State<AppState>) -> Result<String, String> {
+fn start_proxy_inner(_app: &tauri::AppHandle, state: &State<AppState>) -> Result<(), String> {
+    // `start()` now spawns the blocking resolve/check on a background thread
+    // and returns immediately. The outcome is delivered to the UI via the
+    // `vpn-state` (success) and `vpn-error` (failure) events, so the main
+    // thread / UI can never freeze during startup.
     let mut proxy = state.proxy.lock().unwrap();
-    let result = proxy.start();
-    match result {
-        Ok(msg) => {
-            *state.started_at.lock().unwrap() = Some(Instant::now());
-            *state.is_running_cache.lock().unwrap() = proxy.is_running();
-            drop(proxy);
-            update_tray_state(app);
-            Ok(msg)
-        }
-        Err(e) => {
-            // Classify the technical error into a friendly user message.
-            // The full error remains in the backend debug log.
-            let friendly = {
-                let p = state.proxy.lock().unwrap();
-                p.classify_error(&e)
-            };
-            *state.is_running_cache.lock().unwrap() = false;
-            *state.started_at.lock().unwrap() = None;
-            drop(proxy);
-            update_tray_state(app);
-            Err(friendly)
-        }
-    }
+    proxy.start();
+    drop(proxy);
+    // Frontend continues to poll get_status / react to events for the result.
+    Ok(())
 }
 
 fn stop_proxy_inner(state: &State<AppState>) -> Result<String, String> {

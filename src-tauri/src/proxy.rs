@@ -203,59 +203,108 @@ impl ProxyManager {
         }
     }
 
-    pub fn start(&mut self) -> Result<String> {
+    /// Begin a VPN start on a background thread so the (blocking) resolve +
+    /// sing-box check never freeze the Tauri main thread / UI.
+    ///
+    /// Returns immediately. The real outcome is delivered to the frontend via
+    /// the `vpn-state` event on success, or the `vpn-error` event on failure
+    /// (the UI un-freezes with a message instead of hanging).
+    pub fn start(&mut self) {
         // Prevent concurrent starts. If we are already starting/running/
         // stopping, do not spawn another sing-box instance (Test 3).
         let cur = self.state();
         if cur != VpnState::Stopped {
             self.debug_log(format!("[start] ignored: already in state {}", cur.label()));
-            bail!(match cur {
+            let msg = match cur {
                 VpnState::Starting => "VPN is already starting.",
                 VpnState::Running => "VPN is already running.",
                 VpnState::Stopping => "VPN is stopping, please wait.",
                 VpnState::Stopped => unreachable!(),
-            });
+            };
+            if let Some(a) = self.app_handle.lock().unwrap().as_ref() {
+                let _ = a.emit("vpn-error", serde_json::json!({ "message": msg }));
+            }
+            return;
         }
 
         // Mark STARTING before any blocking work so a second call is rejected
         // even while the first is downloading / resolving.
         *self.state.lock().unwrap() = VpnState::Starting;
         self.debug_log("[start] state -> Starting");
+        self.emit_state();
 
-        // Check admin on Windows (needed for TUN)
-        #[cfg(target_os = "windows")]
-        {
-            extern "system" {
-                fn IsUserAnAdmin() -> i32;
+        // Capture the shared bits needed on the worker thread. The state
+        // machine, app handle, and child/monitor live behind Arc<Mutex>, so
+        // the worker can drive them without touching the main thread.
+        let state = Arc::clone(&self.state);
+        let app_handle = Arc::clone(&self.app_handle);
+        let child = Arc::clone(&self.child);
+        let monitor = Arc::clone(&self.monitor);
+        let monitor_epoch = Arc::clone(&self.monitor_epoch);
+        let job = Arc::clone(&self.job);
+        let config_dir = self.config_dir.clone();
+        let dns_cache = Arc::clone(&self.dns_cache);
+
+        thread::spawn(move || {
+            // Re-read config from active mode (inside thread; config.rs reads disk)
+            let cfg = crate::config::get_active_config();
+            // Build a temporary manager pointing at the same shared state so we
+            // can reuse start_inner's logic without holding the caller's &mut.
+            let mut tmp = ProxyManager {
+                child,
+                state,
+                monitor,
+                monitor_epoch,
+                app_handle,
+                job,
+                config_dir: config_dir.clone(),
+                config: cfg,
+                active_mode: Arc::new(Mutex::new(None)),
+                dns_cache,
+                debug_log_path: config_dir.join("dakal-tls-debug.log"),
+            };
+            // Check admin on Windows (needed for TUN)
+            #[cfg(target_os = "windows")]
+            {
+                extern "system" {
+                    fn IsUserAnAdmin() -> i32;
+                }
+                // SAFETY: IsUserAnAdmin() from shell32.dll
+                let is_admin = unsafe { IsUserAnAdmin() != 0 };
+                if !is_admin {
+                    tmp.reset_to_stopped_internal(Some("Admin required — Run as administrator."));
+                    if let Some(a) = tmp.app_handle.lock().unwrap().as_ref() {
+                        let _ = a.emit(
+                            "vpn-error",
+                            serde_json::json!({ "message": "Admin required. Right-click the app → 'Run as administrator'." }),
+                        );
+                    }
+                    return;
+                }
             }
-            // SAFETY: IsUserAnAdmin() from shell32.dll
-            let is_admin = unsafe { IsUserAnAdmin() != 0 };
-            if !is_admin {
-                self.reset_to_stopped_internal(Some("Admin required — Run as administrator."));
-                bail!("Admin required. Right-click stls.exe → 'Run as administrator'.");
+
+            // Clear DNS cache on profile change to prevent IP reuse
+            *tmp.dns_cache.lock().unwrap() = None;
+
+            match tmp.start_inner() {
+                Ok(_) => {
+                    // start_inner already emitted Running via emit_state inside.
+                }
+                Err(e) => {
+                    // ANY failure during startup must return to a consistent
+                    // STOPPED state and leave no orphaned process (Test 4).
+                    tmp.debug_log(format!("[start] failed: {e:#}"));
+                    let friendly = tmp.classify_error(&e);
+                    tmp.reset_to_stopped_internal(Some(&friendly));
+                    if let Some(a) = tmp.app_handle.lock().unwrap().as_ref() {
+                        let _ = a.emit(
+                            "vpn-error",
+                            serde_json::json!({ "message": friendly }),
+                        );
+                    }
+                }
             }
-        }
-
-        // Re-read config from active mode
-        self.config = crate::config::get_active_config();
-        self.debug_log("config loaded");
-
-        // Clear DNS cache on profile change to prevent IP reuse
-        *self.dns_cache.lock().unwrap() = None;
-
-        let result = self.start_inner();
-        match result {
-            Ok(msg) => Ok(msg),
-            Err(e) => {
-                // ANY failure during startup must return to a consistent
-                // STOPPED state and leave no orphaned process (Test 4).
-                self.debug_log(format!("[start] failed: {e:#}"));
-                let friendly = self.classify_error(&e);
-                self.reset_to_stopped_internal(Some(&friendly));
-                // Return the friendly message, not the raw technical error.
-                bail!(friendly);
-            }
-        }
+        });
     }
 
     /// Actual startup work. `start()` wraps this to guarantee state cleanup.
@@ -277,23 +326,60 @@ impl ProxyManager {
             self.debug_log("config unchanged, skipping write");
         }
 
-        // Validate config before launch (no window)
+        // Validate config before launch (no window). Bounded with a timeout so
+        // a config that hangs validation (e.g. Hysteria2 on sing-box 1.13.x)
+        // surfaces an error instead of blocking the worker thread forever.
         self.debug_log("running sing-box check...");
         let mut cmd = Command::new(&exe);
-        let check_output = no_window(&mut cmd)
+        let mut child_check = no_window(&mut cmd)
             .arg("check")
             .arg("-c")
             .arg(&cfg_path)
-            .output()
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
             .context("failed to run sing-box check")?;
-        if !check_output.status.success() {
-            let err_text = String::from_utf8_lossy(&check_output.stderr);
-            let out_text = String::from_utf8_lossy(&check_output.stdout);
-            self.debug_log(format!("config check FAILED: {err_text}{out_text}"));
+        let check_timeout = std::time::Duration::from_secs(8);
+        let check_deadline = std::time::Instant::now() + check_timeout;
+        let mut check_ok = false;
+        loop {
+            match child_check.try_wait() {
+                Ok(Some(status)) => {
+                    check_ok = status.success();
+                    break;
+                }
+                Ok(None) => {
+                    if std::time::Instant::now() >= check_deadline {
+                        let _ = child_check.kill();
+                        let _ = child_check.wait();
+                        self.debug_log("sing-box check timed out after 8s (hung validation?)");
+                        bail!("Configuration validation timed out.\nThe server profile could not be verified. Try ShadowTLS, or reconnect on a different network.");
+                    }
+                    thread::sleep(std::time::Duration::from_millis(100));
+                }
+                Err(e) => {
+                    self.debug_log(format!("sing-box check wait error: {e}"));
+                    bail!("Configuration validation failed to run.");
+                }
+            }
+        }
+        if !check_ok {
+            let err_text = {
+                let mut buf = String::new();
+                if let Some(mut o) = child_check.stderr.take() {
+                    let _ = o.read_to_string(&mut buf);
+                }
+                let mut out = String::new();
+                if let Some(mut o) = child_check.stdout.take() {
+                    let _ = o.read_to_string(&mut out);
+                }
+                format!("{buf}{out}")
+            };
+            self.debug_log(format!("config check FAILED: {err_text}"));
             bail!(
                 "Config validation failed:\n{}{}\nConfig: {}",
                 err_text.trim(),
-                out_text.trim(),
+                "",
                 cfg_path.display()
             );
         }
@@ -855,22 +941,50 @@ impl ProxyManager {
 // ── DNS resolver for STLS server IP (used to build TUN bypass) ────
 
 fn resolve_hostname(host: &str) -> Result<Vec<String>> {
-    let addr_str = format!("{host}:0");
-    let addrs = addr_str
-        .to_socket_addrs()
-        .context("bootstrap DNS resolution failed (using the physical network, before the VPN tunnel exists)")?;
-    let mut ips: Vec<String> = Vec::new();
-    for addr in addrs {
-        let ip = addr.ip().to_string();
-        if !ips.contains(&ip) {
-            ips.push(ip);
+    // `to_socket_addrs()` is a BLOCKING DNS lookup. Bound it with a timeout so
+    // an unresolvable host (e.g. on a network that can't reach the VPS NS)
+    // fails fast with a friendly message instead of hanging the worker thread.
+    let (tx, rx) = std::sync::mpsc::channel();
+    let host_for_thread = host.to_string();
+    let worker = thread::spawn(move || {
+        let addr_str = format!("{host_for_thread}:0");
+        let res = match addr_str.to_socket_addrs() {
+            Ok(addrs) => {
+                let mut ips: Vec<String> = Vec::new();
+                for addr in addrs {
+                    let ip = addr.ip().to_string();
+                    if !ips.contains(&ip) {
+                        ips.push(ip);
+                    }
+                }
+                if ips.is_empty() {
+                    Err(format!("no IPs resolved for {host_for_thread}"))
+                } else {
+                    Ok(ips)
+                }
+            }
+            Err(e) => Err(format!("bootstrap DNS resolution failed: {e}")),
+        };
+        let _ = tx.send(res);
+    });
+
+    match rx.recv_timeout(std::time::Duration::from_secs(8)) {
+        Ok(Ok(ips)) => {
+            println!("[stls] bootstrap resolved {host} -> {ips:?} (used for TUN bypass only; outbound keeps hostname {host})");
+            Ok(ips)
+        }
+        Ok(Err(e)) => bail!("{e}"),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+            // Detach the worker so we never join it (which would block). It
+            // finishes on its own; we just surface the timeout.
+            drop(worker);
+            bail!("Could not resolve server '{host}' within 8s.\nCheck your internet connection, or reconnect on a network that can reach the server.")
+        }
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            drop(worker);
+            bail!("Could not resolve server '{host}'.\nCheck your internet connection, or reconnect on a network that can reach the server.")
         }
     }
-    if ips.is_empty() {
-        bail!("no IPs resolved for {host}");
-    }
-    println!("[stls] bootstrap resolved {host} -> {ips:?} (used for TUN bypass only; outbound keeps hostname {host})");
-    Ok(ips)
 }
 
 // ── tests ───────────────────────────────────────────────────────────
