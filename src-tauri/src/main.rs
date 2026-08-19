@@ -492,13 +492,13 @@ fn update_settings(
         }
     }
     
-    // On a settings/profile change while the tunnel is running, we STOP the
-    // tunnel cleanly and disarm the watchdog. We do NOT auto-restart here:
-    // the stop->start TUN rebind on Windows is racy and leaves a "running but
-    // dead" tunnel (pings die -> watchdog trips -> real IP leaks). A fresh
-    // Connect press does a clean, reliable start. The UI re-arms the watchdog
-    // on the next successful Connect.
-    let stopped = if reconnect {
+    // On a settings/profile change while running: stop the tunnel cleanly,
+    // then tell the frontend to auto-reconnect through the SAME reliable path
+    // the Connect button uses (fresh start_proxy). We deliberately do NOT
+    // inline stop+start here: the Windows TUN rebind in one call is racy and
+    // leaves a "running but dead" tunnel. The frontend disarms the watchdog
+    // during the brief gap and re-arms it on the reconnect's successful ping.
+    let reconnect_needed = if reconnect {
         let was_running = state.proxy.lock().unwrap().is_running();
         if was_running {
             let _ = stop_proxy_inner(&state);
@@ -511,7 +511,7 @@ fn update_settings(
         false
     };
     
-    Ok(stopped)
+    Ok(reconnect_needed)
 }
 
 #[tauri::command]
@@ -536,19 +536,22 @@ fn get_profile() -> Result<String, String> {
 }
 
 #[tauri::command]
-fn set_profile(app: tauri::AppHandle, state: State<AppState>, profile: String) -> Result<(), String> {
+fn set_profile(app: tauri::AppHandle, state: State<AppState>, profile: String) -> Result<bool, String> {
     // Save profile
     config::save_profile(&profile).map_err(|e| e.to_string())?;
     
-    // On a profile change while running, STOP cleanly (do NOT auto-restart — the
-    // stop->start TUN rebind is racy). The user presses Connect for a fresh,
-    // reliable start. The UI disarms the watchdog on profile change.
+    // On a profile change while running: stop cleanly and signal the frontend
+    // to auto-reconnect via the Connect path (fresh start_proxy). The Windows
+    // TUN rebind is racy if done inline, so the frontend owns the timed gap.
     let running = state.proxy.lock().unwrap().is_running();
-    if running {
+    let reconnect_needed = if running {
         let _ = stop_proxy_inner(&state);
-    }
+        true
+    } else {
+        false
+    };
     update_tray_state(&app);
-    Ok(())
+    Ok(reconnect_needed)
 }
 
 /// All selectable server variants (location + instance number)

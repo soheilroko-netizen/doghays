@@ -745,7 +745,7 @@ splitPresetCards.forEach(card => {
     try {
       const running = await invoke('get_status');
       if (preset === 'wow' && !validateWowSelection()) return;
-      await invoke('update_settings', {
+      const reconnect_needed: boolean = await invoke('update_settings', {
         mtu: settingMtu.value ? parseInt(settingMtu.value, 10) : null,
         splitMode: preset,
         tunStack: settingTunStack.value,
@@ -754,10 +754,7 @@ splitPresetCards.forEach(card => {
         reconnect: running
       });
       showMessage('Settings saved', false);
-      if (running) {
-        disarmWatchdog(); // tunnel stopped cleanly; don't trip watchdog
-        showMessage('Settings saved — press Connect to apply & restart', false);
-      }
+      if (reconnect_needed) scheduleAutoReconnect();
     } catch (e) {
       showMessage(`Failed: ${e}`, true);
     }
@@ -787,9 +784,9 @@ btnSaveSettings.addEventListener('click', async () => {
 
     const running = await invoke('get_status');
     if (splitMode === 'wow' && !validateWowSelection()) return;
-    await invoke('update_settings', { mtu, splitMode, tunStack: settingTunStack.value, wowApps: splitMode === 'wow' ? getWowApps() : null, wowDomains: splitMode === 'wow' ? getWowDomains() : null, reconnect: running });
+    const reconnect_needed: boolean = await invoke('update_settings', { mtu, splitMode, tunStack: settingTunStack.value, wowApps: splitMode === 'wow' ? getWowApps() : null, wowDomains: splitMode === 'wow' ? getWowDomains() : null, reconnect: running });
     showMessage('Settings saved', false);
-    if (running) { disarmWatchdog(); showMessage('Settings saved — press Connect to restart', false); } // stopped cleanly; re-arm on Connect
+    if (reconnect_needed) scheduleAutoReconnect();
   } catch (e) {
     showMessage(`Failed: ${e}`, true);
   }
@@ -835,7 +832,9 @@ listen('proxy-log', (event: { payload: string }) => {
 });
 
 // ── Button handlers ──────────────────────────────────────────
-btnStart.addEventListener('click', async () => {
+// Reliable connect path (used by both the Connect button AND auto-reconnect on
+// settings change). Performs a fresh start_proxy + (re)arms the watchdog.
+async function connectTunnel() {
   clearMessage();
   showMessage('Starting...', false);
   try {
@@ -849,6 +848,25 @@ btnStart.addEventListener('click', async () => {
   }
   // Reflect authoritative state (handles immediate failure -> Stopped).
   updateStatus();
+}
+
+// Auto-reconnect after a settings/profile change: the backend has already
+// stopped the tunnel cleanly. We disarm the watchdog, wait for the Windows TUN
+// adapter to fully release (~1.5s), then start a fresh tunnel via connectTunnel.
+// This avoids the racy inline stop->start that left a dead "running" tunnel.
+let autoReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+function scheduleAutoReconnect() {
+  disarmWatchdog();
+  showMessage('Reconnecting...', false);
+  if (autoReconnectTimer) clearTimeout(autoReconnectTimer);
+  autoReconnectTimer = setTimeout(() => {
+    autoReconnectTimer = null;
+    connectTunnel();
+  }, 1500);
+}
+
+btnStart.addEventListener('click', async () => {
+  await connectTunnel();
 });
 
 btnStop.addEventListener('click', async () => {
@@ -885,11 +903,10 @@ protocolTabs.forEach(tab => {
     updateH2PresetVisibility(protocol);
     
     try {
-      await invoke('set_profile', { profile: getProfileName() });
+      const reconnect_needed: boolean = await invoke('set_profile', { profile: getProfileName() });
       if (protocol === 'h2') loadH2PresetSelection();
       await updateStatus();
-      const isRunning = await invoke<boolean>('get_status');
-      if (isRunning) { disarmWatchdog(); showMessage('Protocol changed — press Connect to restart', false); }
+      if (reconnect_needed) scheduleAutoReconnect();
       else showMessage('Protocol changed', false);
     } catch (e) {
       showMessage(`Failed: ${e}`, true);
