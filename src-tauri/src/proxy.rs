@@ -62,6 +62,10 @@ pub struct ProxyManager {
     /// monitor (from a previous start) detects it has been superseded and
     /// exits promptly without touching current state.
     monitor_epoch: Arc<AtomicU64>,
+    /// Epoch token for auto-reconnect. Bumped on manual stop() or a fresh
+    /// start(); an in-flight reconnect loop checks this and aborts if it no
+    /// longer matches (so manual Stop / manual Start wins over auto-retry).
+    reconnect_epoch: Arc<AtomicU64>,
     /// Tray/app handle used by the monitor to emit state-change events.
     app_handle: Arc<Mutex<Option<tauri::AppHandle>>>,
     /// Windows Job Object (kill-on-close). When dropped, the OS kills sing-box.
@@ -72,6 +76,11 @@ pub struct ProxyManager {
     dns_cache: Arc<Mutex<Option<Vec<String>>>>,
     pub debug_log_path: PathBuf,
 }
+
+// Auto-reconnect tuning: retry up to this many times after an unexpected
+// drop, waiting this many seconds between attempts.
+const RECONNECT_TRIES: u32 = 3;
+const RECONNECT_GAP: u64 = 5;
 
 impl ProxyManager {
     pub fn new() -> Result<Self> {
@@ -87,6 +96,7 @@ impl ProxyManager {
             state: Arc::new(Mutex::new(VpnState::Stopped)),
             monitor: Arc::new(Mutex::new(None)),
             monitor_epoch: Arc::new(AtomicU64::new(0)),
+            reconnect_epoch: Arc::new(AtomicU64::new(0)),
             app_handle: Arc::new(Mutex::new(None)),
             job: Arc::new(Mutex::new(None)),
             config_dir: config_dir.clone(),
@@ -215,6 +225,9 @@ impl ProxyManager {
     /// (on the worker thread, when the tunnel actually comes up) — the async
     /// `start()` cannot set them synchronously like the old blocking version.
     pub fn start(&mut self, started_at: Arc<Mutex<Option<Instant>>>, is_running_cache: Arc<Mutex<bool>>) {
+        // A manual Start supersedes any in-flight auto-reconnect loop.
+        self.reconnect_epoch.fetch_add(1, Ordering::SeqCst);
+
         // Prevent concurrent starts. If we are already starting/running/
         // stopping, do not spawn another sing-box instance (Test 3).
         let cur = self.state();
@@ -249,6 +262,7 @@ impl ProxyManager {
         let job = Arc::clone(&self.job);
         let config_dir = self.config_dir.clone();
         let dns_cache = Arc::clone(&self.dns_cache);
+        let reconnect_epoch = Arc::clone(&self.reconnect_epoch);
         let started_at = Arc::clone(&started_at);
         let is_running_cache = Arc::clone(&is_running_cache);
 
@@ -268,6 +282,7 @@ impl ProxyManager {
                 config: cfg,
                 active_mode: Arc::new(Mutex::new(None)),
                 dns_cache,
+                reconnect_epoch,
                 debug_log_path: config_dir.join("dakal-tls-debug.log"),
             };
             // Check admin on Windows (needed for TUN)
@@ -293,13 +308,10 @@ impl ProxyManager {
             // Clear DNS cache on profile change to prevent IP reuse
             *tmp.dns_cache.lock().unwrap() = None;
 
-            match tmp.start_inner() {
+            match tmp.start_inner(started_at.clone(), is_running_cache.clone()) {
                 Ok(_) => {
-                    // start_inner already set state -> Running and emitted it.
-                    // Record the uptime start + mark the running cache so the
-                    // ping/traffic samplers (which read these) work correctly.
-                    *started_at.lock().unwrap() = Some(Instant::now());
-                    *is_running_cache.lock().unwrap() = true;
+                    // start_inner already set state -> Running, emitted it,
+                    // and recorded the uptime start + running cache.
                 }
                 Err(e) => {
                     // ANY failure during startup must return to a consistent
@@ -318,8 +330,104 @@ impl ProxyManager {
         });
     }
 
+    /// Auto-reconnect after an *unexpected* drop. Retries `RECONNECT_TRIES`
+    /// times with `RECONNECT_GAP` seconds between attempts, reusing the same
+    /// startup path as `start()`. Aborts immediately if `reconnect_epoch`
+    /// changes (manual Stop or a fresh manual Start supersedes the loop).
+    /// On final failure, emits a "stopped" event so the UI shows disconnect.
+    pub fn schedule_reconnect(
+        child: Arc<Mutex<Option<Child>>>,
+        state: Arc<Mutex<VpnState>>,
+        monitor: Arc<Mutex<Option<thread::JoinHandle<()>>>>,
+        monitor_epoch: Arc<AtomicU64>,
+        app_handle: Arc<Mutex<Option<tauri::AppHandle>>>,
+        job: Arc<Mutex<Option<WinJob>>>,
+        config_dir: PathBuf,
+        dns_cache: Arc<Mutex<Option<Vec<String>>>>,
+        started_at: Arc<Mutex<Option<Instant>>>,
+        is_running_cache: Arc<Mutex<bool>>,
+        reconnect_epoch: Arc<AtomicU64>,
+    ) {
+        let my_epoch = reconnect_epoch.fetch_add(1, Ordering::SeqCst) + 1;
+
+        thread::spawn(move || {
+            // Small settle so the just-died process/TUN is fully gone.
+            std::thread::sleep(std::time::Duration::from_millis(800));
+
+            for attempt in 1..=RECONNECT_TRIES {
+                // Abort if superseded (manual stop / manual start) or already up.
+                if reconnect_epoch.load(Ordering::SeqCst) != my_epoch {
+                    return;
+                }
+                if *state.lock().unwrap() == VpnState::Running {
+                    return;
+                }
+
+                if let Some(app) = app_handle.lock().unwrap().as_ref() {
+                    let _ = app.emit(
+                        "vpn-state",
+                        serde_json::json!({
+                            "state": "reconnecting",
+                            "message": format!("Connection lost — reconnecting… ({attempt}/{RECONNECT_TRIES})")
+                        }),
+                    );
+                }
+
+                // Build a temporary manager sharing the live state/child so we
+                // can reuse start_inner() exactly like start().
+                let mut tmp = ProxyManager {
+                    child: Arc::clone(&child),
+                    state: Arc::clone(&state),
+                    monitor: Arc::clone(&monitor),
+                    monitor_epoch: Arc::clone(&monitor_epoch),
+                    app_handle: Arc::clone(&app_handle),
+                    job: Arc::clone(&job),
+                    config_dir: config_dir.clone(),
+                    config: crate::config::get_active_config(),
+                    active_mode: Arc::new(Mutex::new(None)),
+                    dns_cache: Arc::clone(&dns_cache),
+                    reconnect_epoch: Arc::clone(&reconnect_epoch),
+                    debug_log_path: config_dir.join("dakal-tls-debug.log"),
+                };
+
+                *tmp.dns_cache.lock().unwrap() = None;
+                match tmp.start_inner(started_at.clone(), is_running_cache.clone()) {
+                    Ok(_) => {
+                        return; // success — start_inner set clocks; leave tunnel up
+                    }
+                    Err(e) => {
+                        tmp.debug_log(format!("[reconnect] attempt {attempt} failed: {e:#}"));
+                        tmp.reset_to_stopped_internal(None);
+                        // Wait the gap before the next try (not after the last).
+                        if attempt < RECONNECT_TRIES {
+                            std::thread::sleep(std::time::Duration::from_secs(RECONNECT_GAP));
+                        }
+                    }
+                }
+            }
+
+            // Exhausted retries.
+            if reconnect_epoch.load(Ordering::SeqCst) == my_epoch {
+                *state.lock().unwrap() = VpnState::Stopped;
+                if let Some(app) = app_handle.lock().unwrap().as_ref() {
+                    let _ = app.emit(
+                        "vpn-state",
+                        serde_json::json!({
+                            "state": "stopped",
+                            "message": "Connection lost and auto-reconnect failed after 3 attempts.\nClick Start to try again."
+                        }),
+                    );
+                }
+            }
+        });
+    }
+
     /// Actual startup work. `start()` wraps this to guarantee state cleanup.
-    fn start_inner(&mut self) -> Result<String> {
+    fn start_inner(
+        &mut self,
+        started_at: Arc<Mutex<Option<Instant>>>,
+        is_running_cache: Arc<Mutex<bool>>,
+    ) -> Result<String> {
         let exe = self.get_bundled_or_download()?;
         self.debug_log(format!("sing-box exe: {}", exe.display()));
 
@@ -443,7 +551,11 @@ impl ProxyManager {
         }
 
         // Spawn the monitor that detects unexpected sing-box exit.
-        self.spawn_monitor();
+        self.spawn_monitor(started_at.clone(), is_running_cache.clone());
+
+        // Record uptime start + mark running cache (used by ping/traffic).
+        *started_at.lock().unwrap() = Some(Instant::now());
+        *is_running_cache.lock().unwrap() = true;
 
         self.emit_state();
         Ok("VPN mode started".to_string())
@@ -494,7 +606,11 @@ impl ProxyManager {
     ///    `reset()` bump `monitor_epoch` and drop the handle; this monitor
     ///    detects the mismatch (or the now-empty child) and returns. No Tauri
     ///    command ever waits on this thread.
-    fn spawn_monitor(&self) {
+    fn spawn_monitor(
+        &self,
+        started_at: Arc<Mutex<Option<Instant>>>,
+        is_running_cache: Arc<Mutex<bool>>,
+    ) {
         self.stop_monitor();
         let my_epoch = self.monitor_epoch.fetch_add(1, Ordering::SeqCst) + 1;
 
@@ -502,6 +618,14 @@ impl ProxyManager {
         let state_arc = self.state.clone();
         let epoch_arc = self.monitor_epoch.clone();
         let app_arc = self.app_handle.clone();
+        let reconnect_epoch = self.reconnect_epoch.clone();
+        let started_at = Arc::clone(&started_at);
+        let is_running_cache = Arc::clone(&is_running_cache);
+        let monitor_arc = self.monitor.clone();
+        let monitor_epoch_arc = self.monitor_epoch.clone();
+        let job_arc = self.job.clone();
+        let config_dir = self.config_dir.clone();
+        let dns_cache = self.dns_cache.clone();
         let log_path = self.debug_log_path.clone();
 
         let handle = thread::spawn(move || {
@@ -555,20 +679,29 @@ impl ProxyManager {
                                 let _ = writeln!(f, "[monitor] sing-box exited unexpectedly: {status}");
                             });
                         // Only react if we are still the live monitor AND we were
-                        // Running (not intentionally Stopping). Reset + notify UI.
+                        // Running (not intentionally Stopping).
                         let live = epoch_arc.load(Ordering::SeqCst) == my_epoch
                             && *state_arc.lock().unwrap() == VpnState::Running;
                         if live {
+                            // Mark stopped immediately so the UI reflects the drop,
+                            // then auto-reconnect (3 tries, 5s apart). Manual Stop
+                            // or a fresh manual Start bumps reconnect_epoch and
+                            // makes the loop abort on its next check.
                             *state_arc.lock().unwrap() = VpnState::Stopped;
-                            if let Some(app) = app_arc.lock().unwrap().as_ref() {
-                                let _ = app.emit(
-                                    "vpn-state",
-                                    serde_json::json!({
-                                        "state": "stopped",
-                                        "message": "The VPN connection was lost.\nThe VPN process stopped unexpectedly."
-                                    }),
-                                );
-                            }
+                            *is_running_cache.lock().unwrap() = false;
+                            ProxyManager::schedule_reconnect(
+                                child_arc,
+                                state_arc,
+                                monitor_arc,
+                                monitor_epoch_arc,
+                                app_arc,
+                                job_arc,
+                                config_dir,
+                                dns_cache,
+                                started_at,
+                                is_running_cache,
+                                reconnect_epoch,
+                            );
                         }
                         return;
                     }
@@ -599,6 +732,10 @@ impl ProxyManager {
             self.debug_log("[stop] ignored: already stopped");
             return Ok("Already stopped".into());
         }
+
+        // Cancel any in-flight auto-reconnect loop: bump its epoch so the loop
+        // sees a mismatch on its next check and aborts (manual Stop wins).
+        self.reconnect_epoch.fetch_add(1, Ordering::SeqCst);
 
         // Mark STOPPING so concurrent callers are rejected and the UI can show
         // the transitional state.

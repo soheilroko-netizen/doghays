@@ -177,6 +177,12 @@ function clearMessage() {
 // sing-box process exits unexpectedly). Show any message and refresh status.
 listen<{ state: string; message?: string }>('vpn-state', (event) => {
   const payload = event.payload;
+  if (payload.state === 'reconnecting' && payload.message) {
+    // Surface the attempt counter directly in the status line.
+    statusText.textContent = payload.message.split('\n')[0];
+    statusDot.classList.remove('connected');
+    statusDot.style.background = 'var(--warning)';
+  }
   if (payload.message) {
     showMessage(payload.message, true);
   }
